@@ -81,6 +81,8 @@ class MNIST(Dataset):
         fig, ax = plt.subplots(1, 5, figsize=(20, 6))
         for n in range(5):
             img = np.transpose(X[n].numpy(), (1, 2, 0))
+            if img.shape[2] == 1:
+                img = img.reshape(img.shape[0]//2, -1)
             ax[n].imshow(img*0.3081 + 0.1307)
             ax[n].set_title(str(y[n].item()))
         plt.show()

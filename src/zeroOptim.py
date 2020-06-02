@@ -1,4 +1,6 @@
 import torch
+from tqdm import tqdm 
+
 
 """
 Classic version of the Zero-order Stochastic Gradient method (ZeroSGD)
@@ -21,7 +23,7 @@ class ZeroSGD(object):
     """
     Perform a zero-order optimization
     """
-    def run(self, x, v, mk, ak, epsilon, max_steps=100, stop_criterion = 0, max_aux_step = 100, verbose=0):
+    def run(self, x, v, mk, ak, epsilon, max_steps=100, stop_criterion = 0, max_aux_step = 100, verbose=0, additional_out=False):
         """
         Args:
         Name            Type                Description
@@ -40,26 +42,38 @@ class ZeroSGD(object):
         self.mins = x.clone() - epsilon
         self.max  = x.clone() + epsilon
         self.epsilon = epsilon
-        x = x.reshape(1, self.dim[0], self.dim[1], self.dim[2])
 
-        losses, xs, outs = [], [], []
-        G, u = [], []
-        for ep in range(max_steps):
+        # Init list for results
+        losses, outs = [], [] #List of losses and outputs
+        xs = []
+
+        # Optimizaion Cycle
+        x = x.reshape(1, self.dim[0], self.dim[1], self.dim[2])
+        self.x = x
+        for ep in tqdm(range(max_steps)):
+            # Call the step
             x, Gk, uk = self.step(x, v, mk[ep], ak[ep], verbose)
+            # Compute new loss
             x = x.reshape(1, self.dim[0], self.dim[1], self.dim[2])
+            if additional_out:
+                xs.append(x.detach().cpu().item())
             out  = self.model(x)
             loss = self.loss(out)
-            G.append(Gk)
-            u.append(uk)
+            # Save results
+            #xs.append(x.cpu().detach().numpy())
             outs.append(out.cpu()[0, self.loss.neuron].item())
             losses.append(loss.cpu().item())
-            xs.append(x.cpu().detach().numpy())
+            # Display current info
             if verbose:
                 print('---------------------------')
                 print('Step number: {}'.format(ep))
                 print('Shape of x:  {}'.format(x))
                 print('New loss:    {}'.format(loss.cpu().item()))
-        return xs, losses, [outs, G, u]
+
+        # Return
+        if additional_out:
+            return x, losses, outs, xs
+        return x, losses, outs
 
     """
     Do an optimization step
@@ -80,8 +94,8 @@ class ZeroSGD(object):
             print('The input x + vu has shape:\t{}'.format(m_x.shape))
 
         # 3. Get objective functions
-        standard_loss = self.compute_loss(x)                                            # Dim (1)
-        gaussian_loss = self.compute_loss(m_x)                                          # Dim (mk)
+        standard_loss = self.loss(self.model(x))                                            # Dim (1)
+        gaussian_loss = self.loss(self.model(m_x))                                          # Dim (mk)
         # 4. Compute gradient approximation
         Gk  = self.compute_Gk(standard_loss, gaussian_loss, v, uk)                       # Dim (channel*width*height)
 
@@ -92,9 +106,11 @@ class ZeroSGD(object):
             # 4. Evaluate approximation of the gradient
             print('GRADIENT APPROXIMATION')
             print('G(u;v,k,x) has shape:\t\t{}'.format(Gk.shape))
+            print('Gradient: {}'.format(ak*Gk/torch.norm(Gk)))
 
         # 4.Find the argmin
         return x.reshape(-1) - ak*Gk/torch.norm(Gk), Gk, uk
+
 
     """
     Generate a random normal vector of size mk
@@ -128,7 +144,8 @@ class ZeroSGD(object):
         # Compute Gv(x(k-1), chi(k-1), u(k))
         fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)             # Dim (mk, 1)
         G =  fv * uk                                                                         # Dim (mk, channel*width*height)
-        return torch.mean(G, axis=0)                                                         # Dim (channel*width*height)
+        return torch.mean(G, axis=0)                                                         # Dim (channel*width*height
+
 
 
 if __name__ == '__main__':
@@ -146,8 +163,8 @@ if __name__ == '__main__':
 
 
         def forward(self, x):
-            x = self.conv(x)
-            return self.linear(x.view(x.shape[0], -1))
+            x = nn.ReLU()(self.conv(x))
+            return nn.Sigmoid()(self.linear(x.view(x.shape[0], -1)))
 
     epoch = 50
     m = [50]*epoch
@@ -160,21 +177,19 @@ if __name__ == '__main__':
     optim = ZeroSGD(model=net, loss=loss)
 
     x = torch.tensor([1])
-    xs, loss_curve, r = optim.run(x.view(1, 1, 1), v, m, a, epsilon=0.5,
-                                     max_steps=epoch, stop_criterion = 0,
-                                     max_aux_step = 100, verbose=0)
-    list_x = [i[0, 0, 0, 0] for i in xs]
+    x, loss_curve, out, xs = optim.run(x.view(1, 1, 1), v, m, a, epsilon=0.5,
+                                max_steps=epoch, stop_criterion = 0,
+                                max_aux_step = 100, verbose=0, additional_out=True)
 
-    min_, max_ = min(list_x), max(list_x)
+    min_, max_ = min(xs), max(xs)
     losses = []
     for i in tqdm(range(int(min_-1)*10, int(max_+1)*10)):
         x = torch.tensor([i/10]).to(torch.device('cuda'))
         out = net(x.view(1, 1, 1, 1))
         losses.append(loss(out))
-    list_x = [i[0, 0, 0, 0] for i in xs]
 
     plt.plot([i/10 for i in range(int(min_-1)*10, int(max_+1)*10)], losses, label='Loss curve')
-    plt.scatter(list_x, loss_curve, label='Parameters')
+    plt.scatter(xs, loss_curve, label='Parameters')
     plt.legend()
     plt.xlabel('Input')
     plt.ylabel('Loss')
