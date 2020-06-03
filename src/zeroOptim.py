@@ -1,5 +1,5 @@
 import torch
-from tqdm import tqdm 
+from tqdm import tqdm
 
 
 """
@@ -23,24 +23,31 @@ class ZeroSGD(object):
     """
     Perform a zero-order optimization
     """
-    def run(self, x, v, mk, ak, epsilon, max_steps=100, stop_criterion = 0, max_aux_step = 100, verbose=0, additional_out=False):
+    def run(self, x, v, mk, ak, epsilon,
+            max_steps=100,  stop_criterion = 1e-10,
+            verbose=0, additional_out=False,
+            tqdm_disable=False):
+
         """
         Args:
         Name            Type                Description
-        x:              (torch.tensor)      The variable of our optimization problem
+        x:              (torch.tensor)      The variable of our optimization problem- Should be a 3D tensor (img)
         v:              (float)             The gaussian smoothing
         mK:             (list)              A list of the the number of normal vector to generate at every step
         aK:             (list)              The momentum to use at every step
         epsilon:        (float)             The upper bound of the infinity norm
         max_steps:      (int)               The maximum number of steps
-        stop_criterion  (float)             TODO
-        max_aux_step    (int)               TODO
-        verbose:        (bool)              Display information or not. Default is 0
+        stop_criterion  (float)             The minimum loss function
+        verbose:        (int)               Display information or not. Default is 0
+        additional_out  (bool)              Return also all the x. Default is False
+        tqdm_disable    (bool)              Disable the tqdm bar. Default is False
         """
+
         self.total_dim = x.shape[0]*x.shape[1]*x.shape[2]
         self.dim  = x.shape
-        self.mins = x.clone() - epsilon
-        self.max  = x.clone() + epsilon
+        x = x.reshape(1, self.dim[0], self.dim[1], self.dim[2])
+        self.mins = (x.clone() - epsilon).view(-1).to(self.device)
+        self.max  = (x.clone() + epsilon).view(-1).to(self.device)
         self.epsilon = epsilon
 
         # Init list for results
@@ -48,27 +55,35 @@ class ZeroSGD(object):
         xs = []
 
         # Optimizaion Cycle
-        x = x.reshape(1, self.dim[0], self.dim[1], self.dim[2])
         self.x = x
-        for ep in tqdm(range(max_steps)):
+        for ep in tqdm(range(max_steps), disable=tqdm_disable):
             # Call the step
             x, Gk, uk = self.step(x, v, mk[ep], ak[ep], verbose)
+            # Project on boundaries
+            if verbose:
+                print('Shape of x: {}'.format(x.shape))
+                print('Shape of min: {}'.format(self.mins.shape))
+                print('Shape of max: {}'.format(self.max.shape))
+            x[self.max-x<0] = self.max[self.max-x<0]
+            x[x-self.mins<0] = self.mins[x-self.mins<0]
             # Compute new loss
             x = x.reshape(1, self.dim[0], self.dim[1], self.dim[2])
-            if additional_out:
-                xs.append(x.detach().cpu().item())
             out  = self.model(x)
             loss = self.loss(out)
             # Save results
-            #xs.append(x.cpu().detach().numpy())
             outs.append(out.cpu()[0, self.loss.neuron].item())
             losses.append(loss.cpu().item())
+            if additional_out:
+                xs.append(x.detach().cpu())
             # Display current info
             if verbose:
                 print('---------------------------')
                 print('Step number: {}'.format(ep))
-                print('Shape of x:  {}'.format(x))
+                print('x:  {}'.format(x))
                 print('New loss:    {}'.format(loss.cpu().item()))
+            # Evaluate stop criterion
+            if loss < stop_criterion:
+                break
 
         # Return
         if additional_out:
