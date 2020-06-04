@@ -4,10 +4,13 @@ from torch import nn
 """
 Abstract object for the Costum Loss. Child of nn.Module
 """
-class CustomLoss(nn.Module):
-
-    def __init__(self):
-        super().__init__()
+class CustomLoss():
+        
+    def __call__(self,args):
+        return self.forward(args)
+        
+    def forward(self, args):
+        raise NotImplementedError
 
 
 """
