@@ -315,13 +315,17 @@ class InexactZSCG(object):
 
         if verbose > 1:
             print('\nINSIDE GRADIENT')
-            print('The Gaussian vector uk has shape:{}'.format(uk.shape))
-            print('The input x has shape:\t\t{}'.format(x.shape))
-            print('The input x + vu has shape:\t{}'.format(m_x.shape))
+            print('The Gaussian vector uk has shape:\t{}'.format(uk.shape))
+            print('The input x has shape:\t\t\t{}'.format(x.shape))
+            print('The input x + vu has shape:\t\t{}'.format(m_x.shape))
 
         # 2. Get objective functions
-        standard_loss = self.loss(self.model(x.view(1, x.shape[0], x.shape[1], x.shape[2])))                                        # Dim (1)
-        gaussian_loss = self.loss(self.model(m_x))                                      # Dim (mk)
+        standard_loss = self.loss(self.model(x.view(1, x.shape[0], x.shape[1], x.shape[2])))         # Dim (1)
+        gaussian_loss = self.loss(self.model(m_x))                                                   # Dim (mk)
+
+        if verbose > 1:
+            print('The standard loss has shape:\t\t{}'.format(standard_loss.shape))
+            print('The gaussian loss has shape:\t\t{}'.format(gaussian_loss.shape))
 
         # 3. Compute Gv(x(k-1), chi(k-1), u(k))
         fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)        # Dim (mk, 1)
@@ -352,7 +356,7 @@ class InexactZSCG(object):
             # 2.1 Compute gradient
             grad = g + gamma*(y_old - x.view(-1))
             # 2.2 Move to the boundaries in one shot
-            y_new = check_boundaries(self.x_original.view(-1) - self.epsilon*torch.sign(grad))
+            y_new = self.check_boundaries(self.x_original.view(-1) - self.epsilon*torch.sign(grad))
             # 2.3 Compute new function value
             h = torch.dot(grad, y_new - y_old)
 

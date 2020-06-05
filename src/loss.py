@@ -5,10 +5,10 @@ from torch import nn
 Abstract object for the Costum Loss. Child of nn.Module
 """
 class CustomLoss():
-        
+
     def __call__(self,args):
         return self.forward(args)
-        
+
     def forward(self, args):
         raise NotImplementedError
 
@@ -39,7 +39,7 @@ class SpecificSoftmaxMSE(CustomLoss):
     def forward(self, y_pred):
         """
         Args
-        y_pred  torch.tensor The output of the networ. Preferable shape (n_batch, n_classes)
+        y_pred  torch.tensor The output of the network. Preferable shape (n_batch, n_classes)
         """
         if len(y_pred.shape) == 1:
             y_pred = y_pred.reshape(1, -1)
