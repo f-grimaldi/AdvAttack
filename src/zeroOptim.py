@@ -2,7 +2,12 @@ import torch
 from tqdm import tqdm
 
 """
-Classic version of the Zero-order Stochastic Gradient method (ZeroSGD)
+Classic version of the Zero-order Stochastic Gradient Descent method (ZeroSGD)
+Based on the paper:
+    Zeroth-order Nonconvex Stochastic Optimization: Handling Constraints, High-Dimensionality and Saddle-Points∗
+by:
+    Krishnakumar Balasubramanian†1 and Saeed Ghadimi‡2
+ALG.5
 """
 class ZeroSGD(object):
     """
@@ -22,19 +27,22 @@ class ZeroSGD(object):
     """
     Perform a zero-order optimization
     """
-    def run(self, x, v, mk, ak, epsilon,
-            max_steps=100,  stop_criterion = 1e-10,
-            verbose=0, additional_out=False,
+    def run(self, x, v, mk,
+            ak, epsilon,
+            C = (0, 1), verbose=0,
+            max_steps=100,
+            stop_criterion = 1e-10,
+            additional_out=False,
             tqdm_disable=False):
-
         """
         Args:
         Name            Type                Description
         x:              (torch.tensor)      The variable of our optimization problem- Should be a 3D tensor (img)
         v:              (float)             The gaussian smoothing
         mK:             (list)              A list of the the number of normal vector to generate at every step
-        aK:             (list)              The momentum to use at every step
+        aK:             (list)              The learning rate to use at every step
         epsilon:        (float)             The upper bound of the infinity norm
+        C:              (tuple)             The range of pixel values
         max_steps:      (int)               The maximum number of steps
         stop_criterion  (float)             The minimum loss function
         verbose:        (int)               Display information or not. Default is 0
@@ -65,6 +73,8 @@ class ZeroSGD(object):
             # Project on boundaries
             x[self.max-x<0] = self.max[self.max-x<0]
             x[x-self.mins<0] = self.mins[x-self.mins<0]
+            x[x < C[0]] = C[0]
+            x[x > C[1]] = C[1]
 
             # Compute new loss
             x = x.reshape(1, self.dim[0], self.dim[1], self.dim[2])
@@ -89,13 +99,19 @@ class ZeroSGD(object):
                 print('New loss:    {}'.format(loss.cpu().item()))
 
             # Evaluate stop criterion
-            if loss < stop_criterion:
+            # Flag if loss is very low
+            condition1 = loss < stop_criterion
+            # Flag if we wanted to minimize the output of a neuron and the prediction is now different
+            condition2 = (int(torch.argmax(out)) != self.loss.neuron) and (self.loss.y_true == 0)
+            # Flag if we wanted to maximise the output of a neuron and now the neuron has the greatest activation
+            condition3 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.y_true == 1)
+            if condition1 or condition2 or condition3:
                 break
 
         # Return
+        x = x.reshape(self.dim[0], self.dim[1], self.dim[2])
         if additional_out:
             return x, losses, outs, xs
-
         return x, losses, outs
 
     """
@@ -164,8 +180,418 @@ class ZeroSGD(object):
         # Compute Gv(x(k-1), chi(k-1), u(k))
         fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)             # Dim (mk, 1)
         G =  fv * uk                                                                         # Dim (mk, channel*width*height)
-        return torch.mean(G, axis=0)                                                         # Dim (channel*width*height
+        return torch.mean(G, axis=0)                                                         # Dim (channel*width*height)
 
+
+
+
+"""
+Zero-order Stochastic Conditional Gradient (ZSCG) with Inexact Conditional Gradient (ICG) update.
+Based on the paper:
+    Zeroth-order Nonconvex Stochastic Optimization: Handling Constraints, High-Dimensionality and Saddle-Points∗
+by:
+    Krishnakumar Balasubramanian†1 and Saeed Ghadimi‡2
+ALG.4 (modified version for non-convex problem)
+"""
+class InexactZSCG(object):
+    """
+    Args:
+    Name            Type                Description
+    model:          (nn.Module)         The model to use to get the output
+    loss:           (nn.Module)         The loss to minimize
+    device:
+    """
+    def __init__(self, model, loss, device=torch.device('cuda')):
+        self.device = device
+        self.loss = loss
+        self.model = model.to(self.device)
+        self.model.eval()
+
+
+    def run(self, x, v, mk, gamma_k, mu_k, epsilon,
+            C = (0, 1) , max_steps=100, stop_criterion=1e-3,
+            verbose=0, additional_out=False, tqdm_disabled=False):
+        """
+        Args:
+        Name            Type                Description
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        v:              (float)             The gaussian smoothing
+        mk:             (list)              Number of normal vector to generate at every step
+        gamma_k         (list)              Pseudo learning rate inside ICG at every step
+        mu_k            (list)              Stopping criterion inside ICG at every step
+        epsilon:        (float)             The upper bound of the infinity norm
+        C:              (tuple)             The boundaires of the pixel. Default is (0, 1)
+        max_steps:      (int)               The maximum number of steps. Default is 100
+        stop_criterion  (float)             The minimum loss function. Default is 1e-3
+        verbose:        (int)               Display information or not. Default is 0
+        additional_out  (bool)              Return also all the x. Default is False
+        tqdm_disable    (bool)              Disable the tqdm bar. Default is False
+        """
+        x = x.to(self.device)
+
+        # 1. Init class attributes
+        self.create_boundaries(x, epsilon, C) # Set x_original min and max
+        self.dim = x.shape
+        self.total_dim = torch.prod(torch.tensor(x.shape))
+        self.epsilon = epsilon
+
+        # 2. Init list of results
+        losses, outs = [], [] # List of losses and outputs
+
+        # 3. Main optimization cycle
+        for ep in tqdm(range(max_steps), disable=tqdm_disabled):
+            if verbose:
+                print("---------------")
+                print("Step number: {}".format(ep))
+            # 3.1 Call the step
+            x, gk = self.step(x, v, gamma_k[ep], mu_k[ep], mk[ep], verbose)
+            x = x.reshape(self.dim[0], self.dim[1], self.dim[2]).detach()
+            # 3.2 Compute loss
+            out = self.model(x.view(1, self.dim[0], self.dim[1], self.dim[2]))
+            loss = self.loss(out)
+            # 3.3 Save results
+            losses.append(loss.detach().cpu().item())
+            outs.append(out.detach().cpu()[0, self.loss.neuron].item())
+            # 3.4 Display current info
+            if verbose:
+                print("Loss:        {}".format(losses[-1]))
+                print("Output:      {}".format(outs[-1]))
+            # 3.5 Check Stopping criterion
+            # Flag if loss is very low
+            condition1 = loss < stop_criterion
+            # Flag if we wanted to minimize the output of a neuron and the prediction is now different
+            condition2 = (int(torch.argmax(out)) != self.loss.neuron) and (self.loss.y_true == 0)
+            # Flag if we wanted to maximise the output of a neuron and now the neuron has the greatest activation
+            condition3 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.y_true == 1)
+            if condition1 or condition2 or condition3:
+                            break
+
+        return  x, losses, outs
+
+    """
+    Do an optimization step
+    """
+    def step(self, x, v, gamma, mu, mk, verbose=0):
+        """
+        Args:
+        Name            Type                Description
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        v:              (float)             The gaussian smoothing
+        gamma:          (float)             The update parameters of g
+        mu:             (float)             The stopping criterion
+        mk:             (int)               The number of Gaussian Random Vector to generate
+        verbose:        (bool)              Display information or not. Default is 0
+        """
+        # Compute the approximated gradient
+        g = self.compute_Gk(x, v, mk, verbose)
+        # Call the inexact conditional gradient
+        x_new = self.compute_ICG(x, g, gamma, mu, verbose).reshape(x.shape[0], x.shape[1], x.shape[2])
+
+        if verbose > 1:
+            print("\nINSIDE STEP")
+            print("Gradient has shape: {}".format(g.shape))
+            print("Gradient is:\n{}".format(g))
+            print("x_new has shape: {}".format(x_new.shape))
+            print("x_new is:\n{}".format(x_new))
+
+        return x_new.detach(), g.detach()
+
+    """
+    Compute the Gv(x(k-1), chi(k-1), u(k)) in order to compute an approximation of the gradient of f(x(k-1), chi(k-1))
+    """
+    def compute_Gk(self, x, v, mk, verbose=0):
+        """
+        Args:
+        Name            Type                Description
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        v:              (float)             The gaussian smoothing
+        verbose:        (bool)              Display information or not. Default is 0
+        """
+        # 1. Create x(k-1) + v*u(k-1)
+        uk     = torch.empty(mk, self.total_dim).normal_(mean=0, std=1).to(self.device) # Dim (mk, channel*width*height)
+        img_u  = uk.reshape(mk, self.dim[0], self.dim[1], self.dim[2])                  # Dim (mk, channel, width, height)
+        img_x  = x.expand(mk, self.dim[0], self.dim[1], self.dim[2])                    # Dim (mk, channel, width, height)
+        m_x    = (img_x + v*img_u)                                                      # Dim (mk, channel, width, height)
+
+        if verbose > 1:
+            print('\nINSIDE GRADIENT')
+            print('The Gaussian vector uk has shape:{}'.format(uk.shape))
+            print('The input x has shape:\t\t{}'.format(x.shape))
+            print('The input x + vu has shape:\t{}'.format(m_x.shape))
+
+        # 2. Get objective functions
+        standard_loss = self.loss(self.model(x.view(1, x.shape[0], x.shape[1], x.shape[2])))                                        # Dim (1)
+        gaussian_loss = self.loss(self.model(m_x))                                      # Dim (mk)
+
+        # 3. Compute Gv(x(k-1), chi(k-1), u(k))
+        fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)        # Dim (mk, 1)
+        G = fv * uk                                                                     # Dim (mk, channel*width*height)
+
+        return torch.mean(G, axis=0).detach()
+
+    """
+    Compute the Inexact Condtion Gradient (Algorothm 3 of source article)
+    """
+    def compute_ICG(self, x, g, gamma, mu, verbose):
+        """
+        Args:
+        Name            Type                Description
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        g:              (torch.tensor)      The approximated gradient. Should be a 1D tensor
+        gamma:          (float)             The update parameters of g
+        mu:             (float)             The stopping criterion
+        """
+        # 1. Init variables
+        y_old = x.view(-1).clone() # dim = (n_channel * width * height)
+        u = torch.rand(self.total_dim).to(self.device)*(self.max.view(-1) - self.min.view(-1)) + self.min.view(-1)
+        t = 1
+        k = 0
+
+        # 2. Main cycle
+        while(k==0):
+            # 2.1 Compute gradient
+            grad = g + gamma*(y_old - x.view(-1))
+            # 2.2 Move to the boundaries in one shot
+            y_new = check_boundaries(self.x_original.view(-1) - self.epsilon*torch.sign(grad))
+            # 2.3 Compute new function value
+            h = torch.dot(grad, y_new - y_old)
+
+            if verbose > 1:
+                print('\nINSIDE ICG')
+                print('Time t = {}'.format(t))
+                print('The ICG gradient is:\n{}'.format(grad))
+                print('The new y is:\n {}'.format(y_new))
+                print('The function h(y_new) is {}'.format(h))
+                print('Mu is: {}'.format(mu))
+            # 2.4 Check conditions
+            if h >= -mu:
+                k = 1
+            else:
+                y_old = (t-1)/(t+1)*y_old + 2/(t+1)*y_new
+                t += 1
+
+        return y_old.detach()
+
+    """
+    Create the boundaries of our constraint optimization problem
+    """
+    def create_boundaries(self, x, epsilon, C):
+        """
+        Args:
+        Name            Type                Description
+        x:              (torch.tensor)      The original image. Should be a 3D tensor (img)
+        epsilon:        (float)             The maximum value of ininity norm.
+        """
+        self.x_original = x.clone().to(self.device)           # dim = (n_channel, width, height)
+        self.max = (self.x_original+epsilon).to(self.device)  # dim = (n_channel, width, height)
+        self.min = (self.x_original-epsilon).to(self.device)  # dim = (n_channel, width, height)
+        self.C = C
+        self.max[self.max > C[1]] = C[1]
+        self.min[self.min < C[0]] = C[0]
+
+    """
+    Check the boundaries of our constraint optimization problem
+    """
+    def check_boundaries(self, x):
+        x[x > self.C[1]] = self.C[1]
+        x[x < self.C[0]] = self.C[0]
+        return x
+
+
+"""
+Zero-order Stochastic Conditional Gradient (ZSCG)
+Based on the paper:
+    Zeroth-order Nonconvex Stochastic Optimization: Handling Constraints, High-Dimensionality and Saddle-Points∗
+by:
+    Krishnakumar Balasubramanian†1 and Saeed Ghadimi‡2
+ALG.1
+"""
+class ClassicZSCG(object):
+    """
+    Args:
+    Name            Type                Description
+    model:          (nn.Module)         The model to use to get the output
+    loss:           (nn.Module)         The loss to minimize
+    device:
+    """
+    def __init__(self, model, loss, device=torch.device('cuda')):
+        self.device = device
+        self.loss = loss
+        self.model = model.to(self.device)
+        self.model.eval()
+
+
+    def run(self, x, v, mk, ak , epsilon,
+            C = (0, 1), max_steps=100,
+            stop_criterion=1e-3, verbose=0,
+            additional_out=False, tqdm_disabled=False):
+        """
+        Args:
+        Name            Type                Description
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        v:              (float)             The gaussian smoothing
+        mk:             (list)              Number of normal vector to generate at every step
+        ak              (list)              Pseudo learning rate/momentum  every step
+        epsilon:        (float)             The upper bound of the infinity norm
+        C:              (tuple)             The boundaires of the pixel. Default is (0, 1)
+        max_steps:      (int)               The maximum number of steps. Default is 100
+        stop_criterion  (float)             The minimum loss function. Default is 1e-3
+        verbose:        (int)               Display information or not. Default is 0
+        additional_out  (bool)              Return also all the x. Default is False
+        tqdm_disable    (bool)              Disable the tqdm bar. Default is False
+        """
+        x = x.to(self.device)
+
+        # 1. Init class attributes
+        self.create_boundaries(x, epsilon, C) # Set x_original min and max
+        self.dim = x.shape
+        self.total_dim = torch.prod(torch.tensor(x.shape))
+        self.epsilon = epsilon
+
+        # 2. Init list of results
+        losses, outs = [], [] # List of losses and outputs
+
+        # 3. Main optimization cycle
+        for ep in tqdm(range(max_steps), disable=tqdm_disabled):
+            if verbose:
+                print("---------------")
+                print("Step number: {}".format(ep))
+            # 3.1 Call the step
+            x, gk = self.step(x, v, ak[ep], mk[ep], verbose)
+            x = x.reshape(self.dim[0], self.dim[1], self.dim[2]).detach()
+            # 3.2 Compute loss
+            out = self.model(x.view(1, self.dim[0], self.dim[1], self.dim[2]))
+            loss = self.loss(out)
+            # 3.3 Save results
+            losses.append(loss.detach().cpu().item())
+            outs.append(out.detach().cpu()[0, self.loss.neuron].item())
+            # 3.4 Display current info
+            if verbose:
+                print("Loss:        {}".format(losses[-1]))
+                print("Output:      {}".format(outs[-1]))
+            # 3.5 Check Stopping criterions
+            # Flag if loss is very low
+            condition1 = loss < stop_criterion
+            # Flag if we wanted to minimize the output of a neuron and the prediction is now different
+            condition2 = (int(torch.argmax(out)) != self.loss.neuron) and (self.loss.y_true == 0)
+            # Flag if we wanted to maximise the output of a neuron and now the neuron has the greatest activation
+            condition3 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.y_true == 1)
+            if condition1 or condition2 or condition3:
+                break
+
+        return  x, losses, outs
+
+    """
+    Do an optimization step
+    """
+    def step(self, x, v, ak, mk, verbose=0):
+        """
+        Args:
+        Name            Type                Description
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        v:              (float)             The gaussian smoothing
+        ak:             (float)             The weight avarage in the updating phase. (1 means take only the new x, 0 means no update)
+        mk:             (int)               The number of Gaussian Random Vector to generate
+        verbose:        (bool)              Display information or not. Default is 0
+        """
+
+        # Compute the approximated gradient
+        g = self.compute_Gk(x, v, mk, verbose)
+        # Call the inexact conditional gradient
+        x_g = self.compute_CG(x, g, verbose).reshape(x.shape[0], x.shape[1], x.shape[2])
+        x_new = (1-ak)*x + ak*x_g
+
+        if verbose > 1:
+            print("\nINSIDE STEP")
+            print("Gradient has shape: {}".format(g.shape))
+            print("Gradient is:\n{}".format(g))
+            print("x_new has shape: {}".format(x_new.shape))
+            print("x_new is:\n{}".format(x_new))
+
+        return x_new.detach(), g.detach()
+
+    """
+    Compute the Gv(x(k-1), chi(k-1), u(k)) in order to compute an approximation of the gradient of f(x(k-1), chi(k-1))
+    """
+    def compute_Gk(self, x, v, mk, verbose=0):
+        """
+        Args:
+        Name            Type                Description
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        v:              (float)             The gaussian smoothing
+        mk:             (int)               The number of Gaussian Random Vector to generate
+        verbose:        (bool)              Display information or not. Default is 0
+        """
+        # 1. Create x(k-1) + v*u(k-1)
+        uk     = torch.empty(mk, self.total_dim).normal_(mean=0, std=1).to(self.device) # Dim (mk, channel*width*height)
+        img_u  = uk.reshape(mk, self.dim[0], self.dim[1], self.dim[2])                  # Dim (mk, channel, width, height)
+        img_x  = x.expand(mk, self.dim[0], self.dim[1], self.dim[2])                    # Dim (mk, channel, width, height)
+        m_x    = (img_x + v*img_u)                                                      # Dim (mk, channel, width, height)
+
+        if verbose > 1:
+            print('\nINSIDE GRADIENT')
+            print('The Gaussian vector uk has shape:{}'.format(uk.shape))
+            print('The input x has shape:\t\t{}'.format(x.shape))
+            print('The input x + vu has shape:\t{}'.format(m_x.shape))
+
+        # 2. Get objective functions
+        standard_loss = self.loss(self.model(x.view(1, x.shape[0], x.shape[1], x.shape[2])))                                        # Dim (1)
+        gaussian_loss = self.loss(self.model(m_x))                                      # Dim (mk)
+
+        # 3. Compute Gv(x(k-1), chi(k-1), u(k))
+        fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)        # Dim (mk, 1)
+        G = fv * uk                                                                     # Dim (mk, channel*width*height)
+
+        return torch.mean(G, axis=0).detach()
+
+
+    def compute_CG(self, x, g, verbose):
+        """
+        Args:
+        Name            Type                Description
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        g:              (torch.tensor)      The approximated gradient. Should be a 1D tensor
+        """
+        # 1. Init variables
+        x = x.view(-1) # dim = (n_channel * width * height)
+        u = torch.rand(self.total_dim).to(self.device)*(self.max.view(-1) - self.min.view(-1)) + self.min.view(-1)
+
+        # 2. Main cycle
+        x_new = self.check_boundaries(self.x_original.view(-1) - self.epsilon*torch.sign(g))
+
+        if verbose > 1:
+            print('\nINSIDE CG')
+            print('Epsilon * Sign(g) is {}'.format(self.epsilon*torch.sign(g)))
+            print('Unchecked new x is: {}'.format(self.x_original.view(-1) - self.epsilon*torch.sign(g)))
+            print('The CG gradient is:\n{}'.format(g))
+            print('The new x is:\n {}'.format(x_new))
+
+        return x_new.detach()
+
+    """
+    Create the boundaries of our constraint optimization problem
+    """
+    def create_boundaries(self, x, epsilon, C):
+        """
+        Args:
+        Name            Type                Description
+        x:              (torch.tensor)      The original image. Should be a 3D tensor (img)
+        epsilon:        (float)             The maximum value of ininity norm.
+        """
+        self.x_original = x.clone().to(self.device)           # dim = (n_channel, width, height)
+        self.max = (self.x_original+epsilon).to(self.device)  # dim = (n_channel, width, height)
+        self.min = (self.x_original-epsilon).to(self.device)  # dim = (n_channel, width, height)
+        self.C = C
+        self.max[self.max > C[1]] = C[1]
+        self.min[self.min < C[0]] = C[0]
+
+    """
+    Check if the boundaries are respected
+    """
+    def check_boundaries(self, x):
+        x[x > self.C[1]] = self.C[1]
+        x[x < self.C[0]] = self.C[0]
+        return x
 
 
 if __name__ == '__main__':
