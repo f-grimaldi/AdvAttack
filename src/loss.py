@@ -4,12 +4,12 @@ from torch import nn
 """
 Abstract object for the Costum Loss. Child of nn.Module
 """
-class CustomLoss():
-        
-    def __call__(self,args):
+class CustomLoss(object):
+
+    def __call__(self, *args, **kwargs):
         return self.forward(args)
-        
-    def forward(self, args):
+
+    def forward(self, *args, **kwargs):
         raise NotImplementedError
 
 
@@ -23,7 +23,7 @@ class SpecificSoftmaxMSE(CustomLoss):
         """
         Args:
         Name     Type    Desc
-        neuron:  int     The output neuron to minimize
+        neuron   int     The output neuron to minimize
         y_true   float   The desired activation
         dim      int     The softmax axis. Default is one for tensor with shape (n_batches, n_classes)
         """
