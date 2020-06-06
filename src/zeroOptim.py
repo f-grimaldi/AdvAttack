@@ -44,7 +44,6 @@ class ZeroSGD(object):
         epsilon:        (float)             The upper bound of the infinity norm
         C:              (tuple)             The range of pixel values
         max_steps:      (int)               The maximum number of steps
-        stop_criterion  (float)             The minimum loss function
         verbose:        (int)               Display information or not. Default is 0
         additional_out  (bool)              Return also all the x. Default is False
         tqdm_disable    (bool)              Disable the tqdm bar. Default is False
@@ -99,13 +98,11 @@ class ZeroSGD(object):
                 print('New loss:    {}'.format(loss.cpu().item()))
 
             # Evaluate stop criterion
-            # Flag if loss is very low
-            condition1 = loss < stop_criterion
             # Flag if we wanted to minimize the output of a neuron and the prediction is now different
-            condition2 = (int(torch.argmax(out)) != self.loss.neuron) and (self.loss.y_true == 0)
+            condition1 = (int(torch.argmax(out)) != self.loss.neuron) and (self.loss.maximise == 0)
             # Flag if we wanted to maximise the output of a neuron and now the neuron has the greatest activation
-            condition3 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.y_true == 1)
-            if condition1 or condition2 or condition3:
+            condition2 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.maximise == 1)
+            if condition1 or condition2:
                 break
 
         # Return
@@ -207,7 +204,7 @@ class InexactZSCG(object):
 
 
     def run(self, x, v, mk, gamma_k, mu_k, epsilon,
-            C = (0, 1) , max_steps=100, stop_criterion=1e-3,
+            C = (0, 1) , max_steps=100,
             verbose=0, additional_out=False, tqdm_disabled=False,
             max_t=100000):
         """
@@ -221,7 +218,6 @@ class InexactZSCG(object):
         epsilon:        (float)             The upper bound of the infinity norm
         C:              (tuple)             The boundaires of the pixel. Default is (0, 1)
         max_steps:      (int)               The maximum number of steps. Default is 100
-        stop_criterion  (float)             The minimum loss function. Default is 1e-3
         verbose:        (int)               Display information or not. Default is 0
         additional_out  (bool)              Return also all the x. Default is False
         tqdm_disable    (bool)              Disable the tqdm bar. Default is False
@@ -261,13 +257,11 @@ class InexactZSCG(object):
                 print("Loss:        {}".format(losses[-1]))
                 print("Output:      {}".format(outs[-1]))
             # 3.5 Check Stopping criterion
-            # Flag if loss is very low
-            condition1 = loss < stop_criterion
             # Flag if we wanted to minimize the output of a neuron and the prediction is now different
-            condition2 = (int(torch.argmax(out)) != self.loss.neuron) and (self.loss.y_true == 0)
+            condition1 = (int(torch.argmax(out)) != self.loss.neuron) and (self.loss.maximise == 0)
             # Flag if we wanted to maximise the output of a neuron and now the neuron has the greatest activation
-            condition3 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.y_true == 1)
-            if condition1 or condition2 or condition3:
+            condition2 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.maximise == 1)
+            if condition1 or condition2:
                 break
 
         if additional_out:
@@ -447,7 +441,6 @@ class ClassicZSCG(object):
         epsilon:        (float)             The upper bound of the infinity norm
         C:              (tuple)             The boundaires of the pixel. Default is (0, 1)
         max_steps:      (int)               The maximum number of steps. Default is 100
-        stop_criterion  (float)             The minimum loss function. Default is 1e-3
         verbose:        (int)               Display information or not. Default is 0
         additional_out  (bool)              Return also all the x. Default is False
         tqdm_disable    (bool)              Disable the tqdm bar. Default is False
@@ -482,13 +475,11 @@ class ClassicZSCG(object):
                 print("Loss:        {}".format(losses[-1]))
                 print("Output:      {}".format(outs[-1]))
             # 3.5 Check Stopping criterions
-            # Flag if loss is very low
-            condition1 = loss < stop_criterion
             # Flag if we wanted to minimize the output of a neuron and the prediction is now different
-            condition2 = (int(torch.argmax(out)) != self.loss.neuron) and (self.loss.y_true == 0)
+            condition1 = (int(torch.argmax(out)) != self.loss.neuron) and (self.loss.maximise == 0)
             # Flag if we wanted to maximise the output of a neuron and now the neuron has the greatest activation
-            condition3 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.y_true == 1)
-            if condition1 or condition2 or condition3:
+            condition2 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.maximise == 1)
+            if condition1 or condition2:
                 break
 
         return  x, losses, outs

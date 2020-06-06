@@ -11,7 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils, datasets
 from torch import nn, optim
 ### CUSTOM
-import utils
+#import utils TO_FIX
 
 """
 Take 1 channel Tensor and return a 3 channel Tensor with same values for each channel
@@ -24,13 +24,15 @@ class RGB(object):
 class MNIST(Dataset):
     """MNIST dataset."""
 
-    def __init__(self, upscaling_dim=(299, 299), transform='standard'):
+    def __init__(self, upscaling_dim=(299, 299), transform='standard', root='data/mnist'):
         """
         Args:
-            dim  (tuple):                        The dimension of the upscaling
-            transform (torchvision.transform):   The transfrom to apply. Default is 'standard' (ToTensor, Normalize, UpScaling)
+            dim       (tuple)                    The dimension of the upscaling
+            transform (torchvision.transform)    The transfrom to apply. Default is 'standard' (ToTensor, Normalize, UpScaling)
+            root      (string)                   The path of the root of the data
         """
         self.dim = upscaling_dim
+        self.root = root
         self.transform = self.get_transform(transform)
         self.get_dataset()
 
@@ -49,8 +51,8 @@ class MNIST(Dataset):
     Get dataset
     """
     def get_dataset(self):
-        self.train_dataset = datasets.MNIST(root='../data/mnist', train=True, download=True, transform=self.transform)
-        self.test_dataset = datasets.MNIST(root='../data/mnist', train=False, download=True, transform=self.transform)
+        self.train_dataset = datasets.MNIST(root=self.root, train=True, download=True, transform=self.transform)
+        self.test_dataset = datasets.MNIST(root=self.root, train=False, download=True, transform=self.transform)
 
     """
     Get dataloader

@@ -4,7 +4,21 @@ from torch import nn
 """
 Abstract object for the Costum Loss. Child of nn.Module
 """
-class CustomLoss():
+class Loss():
+
+    def __init__(self, neuron, maximise=0):
+
+        """
+        TODO: neuron -> target
+        """
+        """
+        Args:
+        Name       Type    Desc
+        neuron     int     The output neuron to minimize
+        maximise   bool    The desired activation
+        """
+        self.neuron = neuron
+        self.maximise = maximise
 
     def __call__(self,args):
         return self.forward(args)
@@ -17,20 +31,18 @@ class CustomLoss():
 Given a target neuron and a target (y_true).
 Compute the Mean Squared Difference between the softmax output and the target
 """
-class SpecificSoftmaxMSE(CustomLoss):
+class SpecificSoftmaxMSE(Loss):
 
-    def __init__(self, neuron, y_true=0, dim=1):
+    def __init__(self, neuron, maximise=0, dim=1):
+        super().__init__(neuron, maximise)
         """
         Args:
-        Name     Type    Desc
-        neuron:  int     The output neuron to minimize
-        y_true   float   The desired activation
-        dim      int     The softmax axis. Default is one for tensor with shape (n_batches, n_classes)
+        Name       Type    Desc
+        neuron:    int     The output neuron to minimize
+        maximise   bool.   The desired activation (0/1)
         """
-        super().__init__()
-        self.neuron = neuron
-        self.y_true = y_true
         self.logits = nn.Softmax(dim=dim)
+
 
     """
     Compute the MSE after computing the softmax of input.
@@ -43,4 +55,4 @@ class SpecificSoftmaxMSE(CustomLoss):
         """
         if len(y_pred.shape) == 1:
             y_pred = y_pred.reshape(1, -1)
-        return 0.5*(self.y_true - self.logits(y_pred)[:, self.neuron])**2
+        return 0.5*(self.maximise - self.logits(y_pred)[:, self.neuron])**2
