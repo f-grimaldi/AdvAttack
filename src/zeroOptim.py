@@ -538,8 +538,13 @@ class ClassicZSCG(object):
             print('The input x + vu has shape:\t{}'.format(m_x.shape))
 
         # 2. Get objective functions
-        standard_loss = self.loss(self.model(x.view(1, x.shape[0], x.shape[1], x.shape[2])))                                        # Dim (1)
-        gaussian_loss = self.loss(self.model(m_x))                                      # Dim (mk)
+        standard_loss = self.loss(self.model(x.view(1, x.shape[0], x.shape[1], x.shape[2])))             # Dim (1)
+        gaussian_loss = self.loss(self.model(m_x))                                                       # Dim (mk)
+
+        if verbose > 1:
+            print('Standard Loss is: {}'.format(standard_loss))
+            print('Gaussian Loss is: {}'.format(gaussian_loss))
+
 
         # 3. Compute Gv(x(k-1), chi(k-1), u(k))
         fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)        # Dim (mk, 1)
