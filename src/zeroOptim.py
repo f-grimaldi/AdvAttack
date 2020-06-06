@@ -183,8 +183,6 @@ class ZeroSGD(object):
         return torch.mean(G, axis=0)                                                         # Dim (channel*width*height)
 
 
-
-
 """
 Zero-order Stochastic Conditional Gradient (ZSCG) with Inexact Conditional Gradient (ICG) update.
 Based on the paper:
@@ -210,7 +208,8 @@ class InexactZSCG(object):
 
     def run(self, x, v, mk, gamma_k, mu_k, epsilon,
             C = (0, 1) , max_steps=100, stop_criterion=1e-3,
-            verbose=0, additional_out=False, tqdm_disabled=False):
+            verbose=0, additional_out=False, tqdm_disabled=False,
+            max_t=100000):
         """
         Args:
         Name            Type                Description
@@ -226,6 +225,7 @@ class InexactZSCG(object):
         verbose:        (int)               Display information or not. Default is 0
         additional_out  (bool)              Return also all the x. Default is False
         tqdm_disable    (bool)              Disable the tqdm bar. Default is False
+        max_t           (int)               The maximum number of iteration inside of ICG
         """
         x = x.to(self.device)
 
@@ -234,9 +234,11 @@ class InexactZSCG(object):
         self.dim = x.shape
         self.total_dim = torch.prod(torch.tensor(x.shape))
         self.epsilon = epsilon
+        self.max_t = max_t
 
         # 2. Init list of results
         losses, outs = [], [] # List of losses and outputs
+        input_list = []
 
         # 3. Main optimization cycle
         for ep in tqdm(range(max_steps), disable=tqdm_disabled):
@@ -248,10 +250,12 @@ class InexactZSCG(object):
             x = x.reshape(self.dim[0], self.dim[1], self.dim[2]).detach()
             # 3.2 Compute loss
             out = self.model(x.view(1, self.dim[0], self.dim[1], self.dim[2]))
-            loss = self.loss(out)
+            loss = self.loss(out).view(-1, 1)
             # 3.3 Save results
             losses.append(loss.detach().cpu().item())
             outs.append(out.detach().cpu()[0, self.loss.neuron].item())
+            if additional_out:
+                input_list.append(x.cpu().data.numpy())
             # 3.4 Display current info
             if verbose:
                 print("Loss:        {}".format(losses[-1]))
@@ -264,8 +268,10 @@ class InexactZSCG(object):
             # Flag if we wanted to maximise the output of a neuron and now the neuron has the greatest activation
             condition3 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.y_true == 1)
             if condition1 or condition2 or condition3:
-                            break
+                break
 
+        if additional_out:
+            return x, losses, outs, input_list
         return  x, losses, outs
 
     """
@@ -323,12 +329,14 @@ class InexactZSCG(object):
         standard_loss = self.loss(self.model(x.view(1, x.shape[0], x.shape[1], x.shape[2])))         # Dim (1)
         gaussian_loss = self.loss(self.model(m_x))                                                   # Dim (mk)
 
-        if verbose > 1:
-            print('The standard loss has shape:\t\t{}'.format(standard_loss.shape))
-            print('The gaussian loss has shape:\t\t{}'.format(gaussian_loss.shape))
-
         # 3. Compute Gv(x(k-1), chi(k-1), u(k))
-        fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)        # Dim (mk, 1)
+        fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)                     # Dim (mk, 1)
+
+        if verbose > 1:
+            print('The standard (expand) loss has shape:\t{}'.format(standard_loss.expand(uk.shape[0]).shape))
+            print('The gaussian loss has shape:\t\t{}'.format(gaussian_loss.shape))
+            print('The total function fv has shape:\t{}'.format(fv.shape))
+
         G = fv * uk                                                                     # Dim (mk, channel*width*height)
 
         return torch.mean(G, axis=0).detach()
@@ -368,13 +376,13 @@ class InexactZSCG(object):
                 print('The function h(y_new) is {}'.format(h))
                 print('Mu is: {}'.format(mu))
             # 2.4 Check conditions
-            if h >= -mu:
+            if h >= -mu or t > self.max_t:
                 k = 1
             else:
                 y_old = (t-1)/(t+1)*y_old + 2/(t+1)*y_new
                 t += 1
 
-        return y_old.detach()
+        return self.check_boundaries(y_old.detach())
 
     """
     Create the boundaries of our constraint optimization problem
