@@ -56,3 +56,38 @@ class SpecificSoftmaxMSE(Loss):
         if len(y_pred.shape) == 1:
             y_pred = y_pred.reshape(1, -1)
         return 0.5*(self.maximise - self.logits(y_pred)[:, self.neuron])**2
+
+
+
+"""
+Compute loss as defined in: "ZOO: Zeroth Order Optimization Based Black-box
+Attacks to Deep Neural Networks without Training Substitute Models." [Chen et al]
+"""
+class ZooLoss(Loss):
+
+    def __init__(self, neuron, maximise, transf=0):
+        """
+        Args:
+        Name       Type      Desc
+        neuron     int       If maximize is True is the desired output, the original class label otherwise
+        maximize   bool      If True the attack is targeted, untargeted otherwise
+        transf     float     Transferability parameter
+        """
+        super().__init__(neuron, maximise)
+        self.transf = transf
+
+
+    def forward(self, conf):
+        """
+        Args      Type             Desc
+        conf:     torch_tensor     Vector of length=n_classes containing the confidence score (output of the model)
+        """
+        conf = conf.reshape(-1)
+        conf_log = torch.log(conf)
+        conf_log_neg = torch.cat((conf_log[:self.neuron], conf_log[self.neuron+1:]))
+        if self.maximise:
+            # Targeted
+            return torch.max(torch.max(conf_log_neg) - conf_log[self.neuron], -self.transf)
+        else:
+            # Untargeted
+            return torch.max(conf_log[self.neuron] - torch.max(conf_log_neg), -self.transf)
