@@ -4,6 +4,7 @@ from torch import nn
 """
 Abstract object for the Costum Loss. Child of nn.Module
 """
+<<<<<<< HEAD
 class Loss():
 
     def __init__(self, neuron, maximise=0):
@@ -22,6 +23,12 @@ class Loss():
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
+=======
+class CustomLoss(object):
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(args)
+>>>>>>> 375df038697ec67368640ad9b4fd0f63b0bc20ae
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError
@@ -37,11 +44,18 @@ class MSELoss(Loss):
         super().__init__(neuron, maximise)
         """
         Args:
+<<<<<<< HEAD
         Name        Type    Desc
         neuron:     int     The output neuron to minimize
         maximise    bool.   The desired activation (0/1)
         is_softmax:  bool     Bool indicating if the model output is probability distribution. Default is False
         dim:         int      Dimension of softmax application. Default is 1
+=======
+        Name     Type    Desc
+        neuron   int     The output neuron to minimize
+        y_true   float   The desired activation
+        dim      int     The softmax axis. Default is one for tensor with shape (n_batches, n_classes)
+>>>>>>> 375df038697ec67368640ad9b4fd0f63b0bc20ae
         """
         self.is_softmax = is_softmax
         self.dim = dim
