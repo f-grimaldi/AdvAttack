@@ -31,9 +31,8 @@ class ZeroSGD(object):
             ak, epsilon,
             C = (0, 1), verbose=0,
             max_steps=100,
-            stop_criterion = 1e-10,
             additional_out=False,
-            tqdm_disable=False):
+            tqdm_disabled=False):
         """
         Args:
         Name            Type                Description
