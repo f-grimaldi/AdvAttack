@@ -20,10 +20,10 @@ class Loss():
         self.neuron = neuron
         self.maximise = maximise
 
-    def __call__(self,args):
-        return self.forward(args)
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
 
-    def forward(self, args):
+    def forward(self, *args, **kwargs):
         raise NotImplementedError
 
 
@@ -40,11 +40,11 @@ class MSELoss(Loss):
         Name        Type    Desc
         neuron:     int     The output neuron to minimize
         maximise    bool.   The desired activation (0/1)
-        is_softmax:  bool     Bool indicating if the model output is probability distribution. Defaulti is False
+        is_softmax:  bool     Bool indicating if the model output is probability distribution. Default is False
         dim:         int      Dimension of softmax application. Default is 1
         """
         self.is_softmax = is_softmax
-        self.dim        = dim
+        self.dim = dim
 
     """
     Compute the MSE after computing the softmax of input.
@@ -63,7 +63,7 @@ class MSELoss(Loss):
         if not self.is_softmax:
             logits = nn.Softmax(dim=self.dim)(y_pred)
 
-        return 0.5*(self.maximise - logits[:, self.neuron])**2
+        return 0.5*(int(self.maximise) - logits[:, self.neuron])**2
 
 
 

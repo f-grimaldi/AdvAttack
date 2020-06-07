@@ -6,17 +6,17 @@ and black box attacks
 
 # Dependencies
 from .optimizer import Optimizer
+from tqdm import tqdm
 import numpy as np
 import torch
-import tqdm
 
 
-class FrankWolfeBlackBox(Optimizer):
+class FrankWolfe(Optimizer):
 
     # Override run function
     def run(
         self, x, m_weight=0.3, step_size=1e-4, l_bound=1e-3, num_epochs=10,
-        grad_est='euclidean', grad_est_step=1e-3, grad_est_niter=1e-3,
+        grad_est='gaussian', grad_est_step=1e-3, grad_est_niter=1e-3,
         ret_out=True, verbose=False
     ):
         """
@@ -33,9 +33,9 @@ class FrankWolfeBlackBox(Optimizer):
         grad_est (str):         Name of gradient estimation function
         grad_est_step (float):  Step size to be used in gradient estimation;
         grad_est_niter (float): Number of estimation required in gradient estimation;
-        ret_out (boolean):      Defines wether to compute and return list of losses
+        ret_out (bool):      Defines wether to compute and return list of losses
                                 and outputs at the end of every epoch;
-        verbose (float):        Wether to print output or not;
+        verbose (bool):        Wether to print output or not;
         """
         # Initialize losses and output container
         loss_list, out_list = list(), list()
@@ -48,7 +48,7 @@ class FrankWolfeBlackBox(Optimizer):
                 step_size=grad_est_step,
                 num_iter=grad_est_niter
             )
-        elif grad_est == 'gaussian': # Case estimation function is gaussian
+        elif grad_est == 'gaussian':  # Case estimation function is gaussian
             grad_fn = lambda self, x: self.grad_est_gaussian(
                 x=x,
                 step_size=grad_est_step,
@@ -63,6 +63,8 @@ class FrankWolfeBlackBox(Optimizer):
         x_prev = x_ori.clone()
         # Initialize initial momentum
         m_prev = grad_fn(self, x_prev)
+        # # DEBUG
+        # print('Gradient function is', grad_fn)
         # Loop through each epoch
         for e in tqdm(range(num_epochs), disable=(not verbose)):
             # Compute step
@@ -72,31 +74,35 @@ class FrankWolfeBlackBox(Optimizer):
                 grad_fn=grad_fn,
                 verbose=verbose
             )
+            # Print current output
+            print('Current x\n', x_prev)
             # Case output must be returned: compute it along with loss
             if ret_out or verbose:
                 # Compute out
-                out = self.model(x_prev)
+                out_curr = self.model(x_prev.unsqueeze(0))
                 # Compute loss
-                loss = self.loss(out)
+                loss_curr = self.loss(out_curr)
+                # Put everything to CPU
+                out_curr, loss_curr = out_curr.cpu(), loss_curr.cpu()
                 # Eventually store computed output and loss
                 if ret_out:
-                    out_list.append(out.squeeze().tolist())
-                    loss_list.append(loss.squeeze().item())
+                    out_list.append(out_curr.squeeze().tolist())
+                    loss_list.append(loss_curr.squeeze().item())
                 # Eventually print current output and current loss
                 if verbose:
-                    print('Epoch nr %d' % e+1)
-                    print('Current output: %s' % out.squeeze().tolist())
-                    print('Current loss: %.03f' % loss.squeeze().item())
+                    print('Epoch nr {}'.format(e+1))
+                    print('Current output: {}'.format(out_curr.squeeze().tolist()))
+                    print('Current loss: {:.03f}'.format(loss_curr.squeeze().item()))
                     print()
         # Return new x, loss list, out list
         if ret_out:
-            return x_prev, loss, out
+            return x_prev, loss_list, out_list
         # Return only new x
         return x_prev
 
     # Override step function
     def step(
-        self, x, x_ori, m, grad_fn, m_weight=.3, step_size=1e-4, l_bound=1e-3,
+        self, x, x_ori, m, grad_fn, m_weight=.1, step_size=1e-4, l_bound=0.03,
         verbose=False
     ):
         """
@@ -115,8 +121,8 @@ class FrankWolfeBlackBox(Optimizer):
         """
         # Compute q
         q_curr = grad_fn(self, x)
-        print(grad_fn)  # DEBUG
-        print(q_curr)  # DEBUG
+        # print(grad_fn)  # DEBUG
+        # print(q_curr)  # DEBUG
         # Compute new momentum update
         m_curr = m_weight * m + (1-m_weight) * q_curr
         # Computer Linear Minimization Oracle
@@ -145,28 +151,47 @@ class FrankWolfeBlackBox(Optimizer):
         d = np.prod(q.shape)  # Linearized = 1 * 28 * 28
         # Sample <num iter> vectors from euclidean sphere surface
         u = torch.randn(num_iter, d)
-        u /= torch.norm(u, axis=1).view(-1, 1)
+        u /= torch.norm(u, dim=1).view(-1, 1)
+        # Reshape u such as it has size (num_iter, x.shape)
+        u = u.view(num_iter, *list(x.shape))
+        # Move u to selected device
+        u = u.to(self.device)
+        # Expand x along batch size axis
+        # We want to have an x item for every u item
+        x = x.expand(num_iter, *list(x.shape))
+        # Compute network input
+        net_in = torch.cat(dim=0, tensors=[
+            # 1st half of input batch is for forward terms
+            x + step_size * u,
+            # 2nd half of input batch is for backward terms
+            x - step_size * u
+        ])
+        # Compute outputs
+        net_out = self.model(net_in)
+        # Compute losses
+        net_loss = self.loss(net_out)
+        # # DEBUG
+        # print('Input image\n', x[0].view(-1))
+        # print('First sampled image is\n', u[0].view(-1))
+        # print('First network input image\n', net_in[0].view(-1))
+        # print('Check sampled vector norm\n', torch.norm(u[0].view(-1), dim=0))
+        # # Check norm of first vector
+        # assert torch.norm(u[8].view(-1), dim=0).item() == 1.0, 'Wrong vector normalization'
         # Loop through each step
         for i in range(num_iter):
-            # Reshape current u
-            u_curr = u[i].view(q.shape)
-            # Compute output
-            out = self.model(torch.cat([
-                # 1st item is leftmost term
-                x + step_size * u_curr,  # u[i].shape = (1, 1, 28, 28)
-                # 2nd item is rightmost term
-                x - step_size * u_curr
-            # Conactenate over batch size
-            ], axis=0))
-            # Compute loss
-            loss = self.loss(out)
+            # Get forward loss term
+            fw = net_loss[i]
+            # Get backward loss term
+            bw = net_loss[i + num_iter]
+            # # Get current u
+            # u_curr = u[i].view(-1)
             # Compute update
-            q = q + (d / (2 * step_size * num_iter)) * (loss[0] - loss[1]) * u_curr
+            q = q + ((d / (2 * step_size * num_iter)) * (fw - bw) * u[i])
         # Return estimated gradient
         return q
 
     # Gaussian estimation of the gradient
-    def grad_est_gaussian(self, x, step_size=1e-3, num_iter=10):
+    def grad_est_gaussian(self, x, step_size=1e-3, num_iter=1):
         """
         Samples vectors uniformly from the standard gaussian distribution
 
@@ -181,26 +206,39 @@ class FrankWolfeBlackBox(Optimizer):
         d = np.prod(q.shape)
         # Sample <num iter> vectors from euclidean sphere surface
         u = torch.randn(num_iter, d)
-        # Loop through each step
+        # Reshape u such as it has size (num_iter, x.shape)
+        u = u.view(num_iter, *list(x.shape))
+        # Move u to selected device
+        u = u.to(self.device)
+        # Expand x along batch size axis
+        # We want to have an x item for every u item
+        x = x.expand(num_iter, *list(x.shape))
+        # Compute function input terms
+        net_in = torch.cat(dim=0, tensors=[
+            # 1st half of input batch is for forward terms
+            x + step_size * u,
+            # 2nd half of input batch is for backward terms
+            x - step_size * u
+        ])
+        # Compute outputs
+        net_out = self.model(net_in)
+        # Compute losses
+        net_loss = self.loss(net_out)
+        # Loss output
         for i in range(num_iter):
-            # Reshape current u
-            u_curr = u[i].view(q.shape)
-            # Compute output
-            out = self.model(torch.cat([
-                # 1st item is leftmost term
-                x + step_size * u[i],
-                # 2nd item is rightmost term
-                x - step_size * u[i]
-            ], axis=0))
-            # Compute loss
-            loss = self.loss(out)
+            # Get forward loss term
+            fw = net_loss[i]
+            # Get backward loss term
+            bw = net_loss[i + num_iter]
             # Compute update
-            q = q + (1 / (2 * step_size * num_iter)) * (loss[0] - loss[1]) * u_curr
+            q = q + (1 / (2 * step_size * num_iter)) * (fw - bw) * u[i]
+        # Free memory
+        del x, u, net_out, net_loss
         # Return estimated gradient
         return q
 
     # Compute Linear Minimization Oracle
-    def LMO(self, x_ori, m_curr, epsilon=1e-3):
+    def LMO(self, x_ori, m_curr, l_bound=0.05):
         """
         Computes Linear Minimization Oracle, according to some input.
         Here we use L-infinity norm, changin to another norm means changing
@@ -213,4 +251,4 @@ class FrankWolfeBlackBox(Optimizer):
         m_curr (torch.Tensor)   Current momentum term;
         epsilon (float)         Bound over L-infinity norm
         """
-        return x_ori - epsilon * torch.sign(m_curr)
+        return x_ori - l_bound * torch.sign(m_curr)
