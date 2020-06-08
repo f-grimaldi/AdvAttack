@@ -4,7 +4,7 @@ import math
 from tqdm import tqdm
 
 
-class ZOOptimizer(object):
+class ZOOptim(object):
 
     def __init__(self, model, loss, device='cpu'):
         """
@@ -26,7 +26,7 @@ class ZOOptimizer(object):
     def run(self, x, c, learning_rate=0.001, batch_size=128,
             h=0.0001, beta_1=0.9, beta_2=0.999, solver="adam", hierarchical=False,
             importance_sampling=False, reset_adam_state=False, verbose=False,
-            max_iterations=10000, stop_criterion=1e-10, epsilon=1e-8,
+            max_iterations=10000, stop_criterion=True, epsilon=1e-8,
             tqdm_disable=False, additional_out=False):
         """
         Args:
@@ -41,7 +41,7 @@ class ZOOptimizer(object):
             solver:                 (str)               ADAM or Newton
             epsilon:                (float)             Parameter for update
             max_iterations:         (int)               The maximum number of steps
-            stop_criterion          (float)             The minimum loss function
+            stop_criterion          (boolean)           If true stop when the loss is 0
             hierarchical:           (bool)              If True use hierarchical attack
             importance_sampling:    (bool)              If True use importance sampling
             reset_adam_state:       (bool)              If True reset ADAM state after a valid attack is found
@@ -105,6 +105,13 @@ class ZOOptimizer(object):
                 print('L2 distance: {}'.format(l2))
 
             # Evaluate stop criterion
+            # Flag if we wanted to minimize the output of a neuron and the prediction is now different
+            if stop_criterion:
+                condition1 = (int(torch.argmax(out)) != self.loss.neuron) and (self.loss.maximise==0)
+                # Flag if we wanted to maximise the output of a neuron and now the neuron has the greatest activation
+                condition2 = (int(torch.argmax(out)) == self.loss.neuron) and (self.loss.maximise==1)
+                if condition1 or condition2:
+                    break
 
         # Return
         x = x.reshape(x_dim[0], x_dim[1], x_dim[2])
