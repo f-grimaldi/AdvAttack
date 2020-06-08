@@ -5,23 +5,24 @@ from tqdm import tqdm
 
 
 class ZOOptimizer(object):
-    """
-    Args:
-    Name            Type                Description
-    model:          (nn.Module)         The model to use to get the output
-    loss:           (nn.Module)         The loss to minimize
-    device:
-    """
+
     def __init__(self, model, loss, device='cpu'):
+        """
+        Args:
+            Name            Type                Description
+            model:          (nn.Module)         The model to use to get the output
+            loss:           (nn.Module)         The loss to minimize
+            device:         (str)               Used device ("cpu" or "cuda")
+        """
         self.device = torch.device(device)
         self.loss = loss
         self.model = model.to(self.device)
         self.model.eval()
 
-
     """
     Perform a zero-order optimization
     """
+
     def run(self, x, c, learning_rate=0.001, batch_size=128,
             h=0.0001, beta_1=0.9, beta_2=0.999, solver="adam", hierarchical=False,
             importance_sampling=False, reset_adam_state=False, verbose=False,
@@ -29,49 +30,38 @@ class ZOOptimizer(object):
             tqdm_disable=False, additional_out=False):
         """
         Args:
-        Name                    Type                Description
-        x:                      (torch.tensor)      The variable of our optimization problem- Should be a 3D tensor (img)
-        c:                      (float)             Regularization parameter
-        learning_rate:          (float)             Learning rate
-        maximize:               (bool)              True if the attack is targeted, False otherwise
-        batch_size:             (int)               Coordinates we simultaneously optimize
-        h:                      (float)             Used in gradient approximation (decrease to increase estimation accuracy)
-        beta_1:                 (float)             ADAM hyper-parameter
-        beta_2:                 (float)             ADAM hyper-parameter
-        solver:                 (string)            ADAM or Newton
-        hierarchical:           (bool)              If True use hierarchical attack
-        importance_sampling:    (bool)              If True use importance sampling
-        reset_adam_state:       (bool)              If True reset ADAM state after a valid attack is found
-        epsilon:                (float)             The upper bound of the infinity norm
-        max_iterations:         (int)               The maximum number of steps
-        stop_criterion          (float)             The minimum loss function
-        verbose:                (int)               Display information or not. Default is 0
-        tqdm_disable            (bool)              Disable the tqdm bar. Default is False
+            Name                    Type                Description
+            x:                      (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+            c:                      (float)             Regularization parameter
+            learning_rate:          (float)             Learning rate
+            batch_size:             (int)               Coordinates we simultaneously optimize
+            h:                      (float)             Used in gradient approximation (decrease to increase estimation accuracy)
+            beta_1:                 (float)             ADAM hyper-parameter
+            beta_2:                 (float)             ADAM hyper-parameter
+            solver:                 (str)               ADAM or Newton
+            epsilon:                (float)             Parameter for update
+            max_iterations:         (int)               The maximum number of steps
+            stop_criterion          (float)             The minimum loss function
+            hierarchical:           (bool)              If True use hierarchical attack
+            importance_sampling:    (bool)              If True use importance sampling
+            reset_adam_state:       (bool)              If True reset ADAM state after a valid attack is found
+            verbose:                (int)               Display information. Default is 0
+            tqdm_disable            (bool)              Disable the tqdm bar. Default is False
+        return:
+            x:                      (torch.tensor)      Final image
+            losses:                 (list)
+            outs:                   (list)
         """
 
         # Verify Solver is implemented
         if solver.lower() not in ["adam", "newton"]:
             raise NotImplementedError("Unknown solver, use 'adam' or 'newton'")
 
-        self.c = c
-        self.learning_rate = learning_rate
-        self.batch_size = batch_size
-        self.solver = solver.lower()
-        self.h = h
-        self.beta_1 = beta_1
-        self.beta_2 = beta_2
-        self.verbose = verbose
-        self.epsilon = epsilon
-        # Extension
-        self.hierarchical = hierarchical
-        self.importance_sampling = importance_sampling
-        self.reset_adam_state = reset_adam_state
-
         # Dimension
-        self.total_dim = int(np.prod(x.shape))
-        self.dim = x.shape
-        # Reshape to column vector
-        x = x.reshape(-1, 1)
+        total_dim = int(np.prod(x.shape))
+        x_dim = x.shape
+        # Scale and Reshape x to be column vector
+        x = (x * 0.8 + 0.1).reshape(-1, 1)
         # Store original image
         x_0 = x.clone().detach()
 
@@ -79,122 +69,154 @@ class ZOOptimizer(object):
         losses, l2_dist, outs = [], [], []
 
         # Set ADAM parameters
-        if self.solver == "adam":
-            self.M = torch.zeros(x.shape).to(self.device)
-            self.v = torch.zeros(x.shape).to(self.device)
-            self.T = torch.zeros(x.shape).to(self.device)
+        if solver == "adam":
+            M = torch.zeros(x.shape).to(self.device)
+            v = torch.zeros(x.shape).to(self.device)
+            T = torch.zeros(x.shape).to(self.device)
 
         # Main Iteration
         for iteration in tqdm(range(max_iterations), disable=tqdm_disable):
 
             # Call the step
-            x, g = self.step(x)
+            if solver == "adam":
+                x, g, M, v, T = self.step(x, M, v, T, batch_size, beta_1, beta_2, h, learning_rate,
+                                          epsilon, solver, x_dim, total_dim, verbose)
+
+            elif solver == "newton":
+                # todo
+                print("Speravi eh?")
 
             # Compute new loss
-            out = self.model(x.view(1, self.dim[0], self.dim[1], self.dim[2]))
-            loss = self.loss(out)
-            l2 = torch.norm(x-x_0).detach()
+            out = self.model(x.view(1, x_dim[0], x_dim[1], x_dim[2]))
+            curr_loss = self.loss(out)
+            l2 = torch.norm(x - x_0).detach()
 
             # Save results
             outs.append(float(out.detach().cpu()[0, self.loss.neuron].item()))
-            losses.append(float(loss.detach().cpu().item()))
+            losses.append(float(curr_loss.detach().cpu().item()))
             l2_dist.append(l2)
 
             # Display current info
             if verbose:
                 print('---------------------------')
+                print('Iteration: {}'.format(iteration))
                 print('Shape of x: {}'.format(x.shape))
-                print('x:  {}'.format(x))
-                print('New loss:    {}'.format(loss.cpu().item()))
+                print('New loss:    {}'.format(curr_loss.cpu().item()))
                 print('L2 distance: {}'.format(l2))
 
             # Evaluate stop criterion
 
         # Return
-        x = x.reshape(self.dim[0], self.dim[1], self.dim[2])
+        x = x.reshape(x_dim[0], x_dim[1], x_dim[2])
         if additional_out:
             return x, losses, l2_dist, outs
         return x, losses, outs
 
-
     """
     Do an optimization step
     """
-    def step(self, x):
+
+    def step(self, x, M, v, T, batch_size, beta_1, beta_2, h, learning_rate,
+             epsilon, solver, x_dim, total_dim, verbose):
+        """
+        Args:
+            x:                      (torch.tensor)      The variable of our optimization problem
+            M:                      (torch.tensor)      ADAM parameter
+            v:                      (torch.tensor)      ADAM parameter
+            T:                      (torch.tensor)      N iterations
+            batch_size:             (int)               Compute batch_size gradient for each iteration
+            beta_1:                 (float)             ADAM hyper-parameter
+            beta_2:                 (float)             ADAM hyper-parameter
+            h:                      (float)             Used in gradient approximation
+            learning_rate:          (float)             Learning rate
+            epsilon:                (float)             Parameter for update
+            solver:                 (string)            ADAM or Newton
+            x_dim:                  (torch.size)        Original image shape
+            total_dim:              (int)               Total number of pixels
+            verbose:                (int)               Display information
+        return:
+            x:                      (torch.tensor)      Update Image
+            g_hat:                  (torch.tensor)      Gradient estimation
+        """
 
         # 1. Randomly pick batch_size coordinates
-        if self.batch_size > self.total_dim:
+        if batch_size > total_dim:
             raise ValueError("Batch size must be lower than the total dimension")
-        indices = np.random.choice(self.total_dim, self.batch_size, replace=False)  # return np.ndarray(n_batches)
-        e_matrix = torch.zeros(self.batch_size, self.total_dim).to(self.device)
+        indices = np.random.choice(total_dim, batch_size, replace=False)
+        e_matrix = torch.zeros(batch_size, total_dim).to(self.device)
         for n, i in enumerate(indices):
             e_matrix[n, i] = 1
-        x_expanded = x.view(-1).expand(self.batch_size, self.total_dim).to(self.device)
+        x_expanded = x.view(-1).expand(batch_size, total_dim).to(self.device)
 
         # 2. Call verbose
-        if self.verbose:
+        if verbose > 1:
             print('INPUT')
             print('The input x has shape:\t\t{}'.format(x.shape))
             print('Chosen indices are: {}\n'.format(indices))
 
         # 3. Optimizers
-        if self.solver == "adam":
+        if solver == "adam":
             # Gradient approximation
-            g_hat = self.compute_gradient(x_expanded, e_matrix).view(-1, 1)
+            g_hat = self.compute_gradient(x_expanded, e_matrix, batch_size, h, solver, x_dim).view(-1, 1)
             # Update
-            self.T[indices] = self.T[indices] + 1
-            self.M[indices] = self.beta_1 * self.M[indices] + (1 - self.beta_1) * g_hat
-            self.v[indices] = self.beta_2 * self.v[indices] + (1 - self.beta_2) * g_hat**2
-            M_hat = torch.zeros_like(self.M).to(self.device)
-            v_hat = torch.zeros_like(self.v).to(self.device)
-            M_hat[indices] = self.M[indices] / (1 - self.beta_1 ** self.T[indices])
-            v_hat[indices] = self.v[indices] / (1 - self.beta_2 ** self.T[indices])
-            delta = -self.learning_rate * (M_hat / (torch.sqrt(v_hat) + self.epsilon))
+            T[indices] = T[indices] + 1
+            M[indices] = beta_1 * M[indices] + (1 - beta_1) * g_hat
+            v[indices] = beta_2 * v[indices] + (1 - beta_2) * g_hat ** 2
+            M_hat = torch.zeros_like(M).to(self.device)
+            v_hat = torch.zeros_like(v).to(self.device)
+            M_hat[indices] = M[indices] / (1 - beta_1 ** T[indices])
+            v_hat[indices] = v[indices] / (1 - beta_2 ** T[indices])
+            delta = -learning_rate * (M_hat / (torch.sqrt(v_hat) + epsilon))
             # Remove constraints
-            x = (x-x.mean())/(x.std())
+            x = torch.tan(x * math.pi - (math.pi / 2))
             x = x + delta.view(-1, 1)
-            x = x*x.std()+x.mean()
+            x = (torch.atan(x) + (math.pi / 2)) / math.pi
 
-        elif self.solver == "newton":
+        elif solver == "newton":
             # Gradient and Hessian approximation
-            g_hat, h_hat = self.compute_gradient(x_expanded, e_matrix)
+            g_hat, h_hat = self.compute_gradient(x_expanded, e_matrix, batch_size, h, solver, x_dim)
             # TODO
 
         # 4. Call verbose
-        if self.verbose:
+        if verbose > 1:
             print('OUTPUT')
             print('g_hat has shape {}'.format(g_hat.shape))
             print('g_hat ='.format(g_hat))
 
         # 5. Return
-        return x.detach(), g_hat.detach()
-
+        return x.detach(), g_hat.detach(), M, v, T
 
     """
     Compute Gradient and Hessian
     """
-    def compute_gradient(self, x_expanded, e_matrix):
-        # Intermediate steps
+
+    def compute_gradient(self, x_expanded, e_matrix, batch_size, h, solver, x_dim):
         """
         Args:
-            x_expanded: matrix (n_pixels, n_batches) containing n_batches times the original image
-            e_matrix: matrix (n_pixels, n_batches)
+            x_expanded:             (torch.tensor)      (n_pixels, n_batches) containing n_batches times the original image
+            e_matrix:               (torch.tensor)      (n_pixels, n_batches)
+            batch_size:             (int)               Compute batch_size gradient for each iteration
+            h:                      (float)             Used in gradient approximation
+            solver:                 (string)            ADAM or Newton
+            x_dim:                  (torch.size)        Original image shape
+        return:
+            g_hat:                  (torch.tensor)      Gradient approximation
+            h_hat:                  (torch.tensor)      Hessian approximation (if solver=="Newton")
         """
-        first_input = x_expanded + self.h*e_matrix
-        second_input = x_expanded - self.h * e_matrix
-        first_input_scaled = first_input
-        second_input_scaled = second_input
-        first_out = self.model(first_input_scaled.view(self.batch_size, *list(self.dim)))
-        second_out = self.model(second_input_scaled.view(self.batch_size, *list(self.dim)))
+        # Intermediate steps
+        first_input = x_expanded + h * e_matrix
+        second_input = x_expanded - h * e_matrix
+        first_out = self.model(first_input.view(batch_size, *list(x_dim)))
+        second_out = self.model(second_input.view(batch_size, *list(x_dim)))
         first_term = self.loss(first_out)
         second_term = self.loss(second_out)
 
         # Compute gradient
-        g_hat = (first_term - second_term)/2*self.h
+        g_hat = (first_term - second_term) / 2 * h
 
         # Compute hessian
-        if self.solver == "newton":
-            h_hat = (first_term + second_term - 2*self.loss(x_expanded))/self.h**2
+        if solver == "newton":
+            h_hat = (first_term + second_term - 2 * self.loss(x_expanded)) / h ** 2
             return g_hat.detach(), h_hat.detach()
         return g_hat.detach()
 
