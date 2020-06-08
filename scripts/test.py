@@ -36,13 +36,17 @@ def get_model(data):
         model.load_state_dict(torch.load('../models/VGG16_cifar10_state_dict.pth'))
     return model
 
-def check_output(X, y, model, device):
+def check_output(X, y, model, device, is_softmax, dim):
     out = model(X.view(1, *list(X.shape)))
     y_pred = torch.argmax(out.cpu())
     if y_pred == y:
-        return y
+        if not is_softmax:
+            return y, nn.Softmax(dim=dim)(out)[0, y]
+        return y, out[0, y]
     print('Warnings: the model already misclassify current input. Setting the true target to the predicted one')
-    return y_pred
+    if not is_softmax:
+        return y_pred, nn.Softmax(dim=dim)(out)[0, y_pred]
+    return y_pred, out[0, y_pred]
 
 def get_loss(loss, target_neuron, maximise, is_softmax, softmax_dim):
     if loss == 'MSE':
@@ -260,7 +264,7 @@ if __name__ == '__main__':
     # 4. Chose image to use as variable
     X, y = get_image(args.image_number, args.batch_size, device)
 
-    y = check_output(X, y, model, device)
+    y, original_out = check_output(X, y, model, device, args.is_softmax, args.softmax_dim)
 
     # 6. Set the loss function
     if args.target_neuron == -1:
@@ -268,7 +272,7 @@ if __name__ == '__main__':
         loss_fn = get_loss(args.loss, int(y), maximise, args.is_softmax, args.softmax_dim)
     elif args.target_neuron > -1 and args.target_neuron < 10:
         maximise = 1
-        loss_fn = get_loss(args.loss, args.target_neuron, maximise, args.is_softmax, args.softmax_dim)
+        loss_fn = get_loss(args.loss, args.target_neuron , maximise, args.is_softmax, args.softmax_dim)
     else:
         print('Please select a target neuron in [0, 9]')
         print(sys.exit(1))
@@ -281,9 +285,24 @@ if __name__ == '__main__':
     new_x, loss_list, out_list = optim.run(**params)
 
     # 9. Display results
-    plt.plot(loss_list)
-    plt.title('Loss curve')
-    plt.ylabel('Loss {}'.format(args.loss))
-    plt.xlabel('Step')
-    plt.grid()
+    fig, ax = plt.subplots(1, 2, figsize=(15, 6))
+    # 9.a) Loss
+    ax[0].plot(loss_list)
+    ax[0].set_title('Loss curve')
+    ax[0].set_ylabel('Loss {}'.format(args.loss))
+    ax[0].set_xlabel('Step')
+    ax[0].grid()
+
+    # 9.b) Image
+    new_out = model(new_x.view(1, *list(new_x.shape)))
+    if not args.is_softmax:
+        softmax = nn.Softmax(dim=args.softmax_dim)
+        new_out = softmax(new_out)
+    new_y = torch.argmax(new_out)
+
+    if new_x.shape[0] > 1:
+        ax[1].imshow(np.transpose(new_x.cpu().numpy(), 1, 2, 0))
+    else:
+        ax[1].imshow(new_x.cpu().numpy().reshape(new_x.shape[1], new_x.shape[2]))
+    ax[1].set_title('After attack\nP(X={}) = {:.3f}\nP(X={}) = {:.3f}'.format(y, new_out[0, y], new_y, new_out[0, new_y]))
     plt.show()
