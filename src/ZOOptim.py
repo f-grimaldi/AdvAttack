@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import math
+from tqdm import tqdm
 
 
 class ZOOptimizer(object):
@@ -25,7 +26,7 @@ class ZOOptimizer(object):
             h=0.0001, beta_1=0.9, beta_2=0.999, solver="adam", hierarchical=False,
             importance_sampling=False, reset_adam_state=False, verbose=False,
             max_iterations=10000, stop_criterion=1e-10, epsilon=1e-8,
-            tqdm_disable=False):
+            tqdm_disable=False, additional_out=False):
         """
         Args:
         Name                    Type                Description
@@ -69,33 +70,30 @@ class ZOOptimizer(object):
         # Dimension
         self.total_dim = int(np.prod(x.shape))
         self.dim = x.shape
-        # Store original image
-        x_0 = x.clone()
         # Reshape to column vector
         x = x.reshape(-1, 1)
-        # Remove constraints
-        x = torch.tan(x*math.pi - (math.pi/2))
+        # Store original image
+        x_0 = x.clone().detach()
 
         # Init list of losses, distances and outputs for results
         losses, l2_dist, outs = [], [], []
 
         # Set ADAM parameters
         if self.solver == "adam":
-            self.M = torch.zeros(x.shape)
-            self.v = torch.zeros(x.shape)
-            self.T = torch.zeros(x.shape)
+            self.M = torch.zeros(x.shape).to(self.device)
+            self.v = torch.zeros(x.shape).to(self.device)
+            self.T = torch.zeros(x.shape).to(self.device)
 
         # Main Iteration
         for iteration in tqdm(range(max_iterations), disable=tqdm_disable):
 
             # Call the step
-            x, g = self.step(x, x_0)
+            x, g = self.step(x)
 
             # Compute new loss
-            x = x.reshape(1, self.dim[0], self.dim[1], self.dim[2])
-            out = self.model(x)
+            out = self.model(x.view(1, self.dim[0], self.dim[1], self.dim[2]))
             loss = self.loss(out)
-            l2 = torch.norm(x-x_0)
+            l2 = torch.norm(x-x_0).detach()
 
             # Save results
             outs.append(float(out.detach().cpu()[0, self.loss.neuron].item()))
@@ -114,22 +112,24 @@ class ZOOptimizer(object):
 
         # Return
         x = x.reshape(self.dim[0], self.dim[1], self.dim[2])
-        return x, losses, l2_dist, outs
+        if additional_out:
+            return x, losses, l2_dist, outs
+        return x, losses, outs
 
 
     """
     Do an optimization step
     """
-    def step(self, x, x_0):
+    def step(self, x):
 
         # 1. Randomly pick batch_size coordinates
         if self.batch_size > self.total_dim:
             raise ValueError("Batch size must be lower than the total dimension")
         indices = np.random.choice(self.total_dim, self.batch_size, replace=False)  # return np.ndarray(n_batches)
-        e_matrix = torch.zeros(self.batch_size, self.total_dim, )
+        e_matrix = torch.zeros(self.batch_size, self.total_dim).to(self.device)
         for n, i in enumerate(indices):
             e_matrix[n, i] = 1
-        x_expanded = x.view(-1).expand(self.batch_size, self.total_dim)
+        x_expanded = x.view(-1).expand(self.batch_size, self.total_dim).to(self.device)
 
         # 2. Call verbose
         if self.verbose:
@@ -140,18 +140,20 @@ class ZOOptimizer(object):
         # 3. Optimizers
         if self.solver == "adam":
             # Gradient approximation
-            g_hat = self.compute_gradient(x_expanded, e_matrix)
+            g_hat = self.compute_gradient(x_expanded, e_matrix).view(-1, 1)
             # Update
             self.T[indices] = self.T[indices] + 1
             self.M[indices] = self.beta_1 * self.M[indices] + (1 - self.beta_1) * g_hat
-            self.v[indices] = self.beta_2 * self.v[indices] + (1 - self.beta_2) * g_hat ^ 2
-            M_hat = torch.zeros_like(self.M)
-            v_hat = torch.zeros_like(self.v)
-            M_hat[indices] = self.M[indices] / (1 - self.beta_1 ^ self.T[indices])
-            v_hat[indices] = self.v[indices] / (1 - self.beta_2 ^ self.T[indices])
+            self.v[indices] = self.beta_2 * self.v[indices] + (1 - self.beta_2) * g_hat**2
+            M_hat = torch.zeros_like(self.M).to(self.device)
+            v_hat = torch.zeros_like(self.v).to(self.device)
+            M_hat[indices] = self.M[indices] / (1 - self.beta_1 ** self.T[indices])
+            v_hat[indices] = self.v[indices] / (1 - self.beta_2 ** self.T[indices])
             delta = -self.learning_rate * (M_hat / (torch.sqrt(v_hat) + self.epsilon))
-
-            x[indices] = x[indices] + delta
+            # Remove constraints
+            x = (x-x.mean())/(x.std())
+            x = x + delta.view(-1, 1)
+            x = x*x.std()+x.mean()
 
         elif self.solver == "newton":
             # Gradient and Hessian approximation
@@ -161,7 +163,7 @@ class ZOOptimizer(object):
         # 4. Call verbose
         if self.verbose:
             print('OUTPUT')
-            print('g_hat has shape {}'.format(g_hat.shape()))
+            print('g_hat has shape {}'.format(g_hat.shape))
             print('g_hat ='.format(g_hat))
 
         # 5. Return
@@ -180,21 +182,23 @@ class ZOOptimizer(object):
         """
         first_input = x_expanded + self.h*e_matrix
         second_input = x_expanded - self.h * e_matrix
-        first_input_scaled = (torch.atan(first_input)+(math.pi/2))/math.pi
-        second_input_scaled = (torch.atan(second_input) + (math.pi / 2)) / math.pi
+        first_input_scaled = first_input
+        second_input_scaled = second_input
         first_out = self.model(first_input_scaled.view(self.batch_size, *list(self.dim)))
         second_out = self.model(second_input_scaled.view(self.batch_size, *list(self.dim)))
         first_term = self.loss(first_out)
         second_term = self.loss(second_out)
 
         # Compute gradient
-        g_hat = (first_term + second_term)/2*self.h
+        g_hat = (first_term - second_term)/2*self.h
 
         # Compute hessian
         if self.solver == "newton":
             h_hat = (first_term + second_term - 2*self.loss(x_expanded))/self.h**2
-            return g_hat, h_hat
-        return g_hat
+            return g_hat.detach(), h_hat.detach()
+        return g_hat.detach()
+
+
 
 
 if __name__ == '__main__':
