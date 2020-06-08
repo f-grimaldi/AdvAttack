@@ -139,3 +139,7 @@ cython_debug/
 
 # Exclude data folder
 data/
+.DS_Store
+.idea/
+src/.DS_Store
+src/.idea/
