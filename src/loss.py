@@ -2,15 +2,11 @@ import torch
 from torch import nn
 
 """
-Abstract object for the Costum Loss. Child of nn.Module
+Abstract object for the Custom Loss. Child of nn.Module
 """
-class Loss():
+class Loss:
 
     def __init__(self, neuron, maximise=0):
-
-        """
-        TODO: neuron -> target
-        """
         """
         Args:
         Name       Type    Desc
@@ -20,7 +16,7 @@ class Loss():
         self.neuron = neuron
         self.maximise = maximise
 
-    def __call__(self,args):
+    def __call__(self, args):
         return self.forward(args)
 
     def forward(self, args):
@@ -34,7 +30,6 @@ Compute the Mean Squared Difference between the softmax output and the target
 class MSELoss(Loss):
 
     def __init__(self, neuron, maximise=0, is_softmax=False, dim=1):
-        super().__init__(neuron, maximise)
         """
         Args:
         Name        Type    Desc
@@ -43,8 +38,9 @@ class MSELoss(Loss):
         is_softmax:  bool     Bool indicating if the model output is probability distribution. Defaulti is False
         dim:         int      Dimension of softmax application. Default is 1
         """
+        super().__init__(neuron, maximise)
         self.is_softmax = is_softmax
-        self.dim        = dim
+        self.dim = dim
 
     """
     Compute the MSE after computing the softmax of input.
@@ -62,8 +58,8 @@ class MSELoss(Loss):
         # Deal with non-softmax model output
         if not self.is_softmax:
             logits = nn.Softmax(dim=self.dim)(y_pred)
-
-        return 0.5*(self.maximise - logits[:, self.neuron])**2
+            return 0.5*(int(self.maximise) - logits[:, self.neuron])**2
+        return 0.5*(int(self.maximise) - y_pred[:, self.neuron])**2
 
 
 
@@ -76,12 +72,12 @@ class ZooLoss(Loss):
     def __init__(self, neuron, maximise, transf=0, is_softmax=False, dim=1):
         """
         Args:
-        Name        Type      Desc
-        neuron      int       If maximize is True is the desired output, the original class label otherwise
-        maximize    bool      If True the attack is targeted, untargeted otherwise
-        transf      float     Transferability parameter
-        is_softmax:  bool     Bool indicating if the model output is probability distribution. Defaulti is False
-        dim:         int      Dimension of softmax application. Default is 1
+        Name         Type      Desc
+        neuron       int       If maximize is True is the desired output, the original class label otherwise
+        maximize     bool      If True the attack is targeted, untargeted otherwise
+        transf       float     Transferability parameter
+        is_softmax:  bool      Bool indicating if the model output is probability distribution. Default is False
+        dim:         int       Dimension of softmax application. Default is 1
         """
         super().__init__(neuron, maximise)
         self.transf = transf
