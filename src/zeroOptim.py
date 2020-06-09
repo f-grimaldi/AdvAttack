@@ -29,6 +29,7 @@ class ZeroSGD(object):
     """
     def run(self, x, v, mk,
             ak, epsilon,
+            batch_size = -1,
             C = (0, 1), verbose=0,
             max_steps=100,
             additional_out=False,
@@ -41,6 +42,7 @@ class ZeroSGD(object):
         mK:             (list)              A list of the the number of normal vector to generate at every step
         aK:             (list)              The learning rate to use at every step
         epsilon:        (float)             The upper bound of the infinity norm
+        batch_size:     (int)               The number of batch size when estimating the gradient. Default -1 (=mk)
         C:              (tuple)             The range of pixel values
         max_steps:      (int)               The maximum number of steps
         verbose:        (int)               Display information or not. Default is 0
@@ -56,6 +58,7 @@ class ZeroSGD(object):
         self.mins = (x.clone() - epsilon).view(-1).to(self.device)
         self.max  = (x.clone() + epsilon).view(-1).to(self.device)
         self.epsilon = epsilon
+        self.batch = batch_size
 
         # Init list for results
         losses, outs = [], [] #List of losses and outputs
@@ -131,8 +134,18 @@ class ZeroSGD(object):
             print('The input x + vu has shape:\t{}'.format(m_x.shape))
 
         # 3. Get objective functions
-        standard_loss = self.loss(self.model(x))                                            # Dim (1)
-        gaussian_loss = self.loss(self.model(m_x))                                          # Dim (mk)
+        standard_loss = self.loss(self.model(x.view(1, *list(self.dim))))                   # Dim (1)
+        gaussian_loss = torch.zeros((mk)).to(self.device)                                   # Dim (mk)
+        if self.batch == -1:
+            gaussian_loss = self.loss(self.model(m_x))
+        else:
+            for n in range(mk//self.batch):
+                tmp_loss = self.loss(self.model(m_x[n*self.batch:(n+1)*self.batch, :]))
+                gaussian_loss[n*self.batch:(n+1)*self.batch] = tmp_loss.detach()                     # Dim (mk)
+
+        if verbose > 1:
+            print('Standard Loss is: {}'.format(standard_loss))
+            print('Gaussian Loss is: {}'.format(gaussian_loss))
 
         # 4. Compute gradient approximation
         Gk  = self.compute_Gk(standard_loss, gaussian_loss, v, uk)                       # Dim (channel*width*height)
@@ -203,7 +216,7 @@ class InexactZSCG(object):
 
 
     def run(self, x, v, mk, gamma_k, mu_k, epsilon,
-            C = (0, 1) , max_steps=100,
+            batch_size = -1, C = (0, 1) , max_steps=100,
             verbose=0, additional_out=False, tqdm_disabled=False,
             max_t=100000):
         """
@@ -215,6 +228,7 @@ class InexactZSCG(object):
         gamma_k         (list)              Pseudo learning rate inside ICG at every step
         mu_k            (list)              Stopping criterion inside ICG at every step
         epsilon:        (float)             The upper bound of the infinity norm
+        batch_size      (int)               Maximum parallelization in compute_gk. Default is -1 (=mk)
         C:              (tuple)             The boundaires of the pixel. Default is (0, 1)
         max_steps:      (int)               The maximum number of steps. Default is 100
         verbose:        (int)               Display information or not. Default is 0
@@ -230,6 +244,7 @@ class InexactZSCG(object):
         self.total_dim = torch.prod(torch.tensor(x.shape))
         self.epsilon = epsilon
         self.max_t = max_t
+        self.batch = batch_size
 
         # 2. Init list of results
         losses, outs = [], [] # List of losses and outputs
@@ -319,8 +334,19 @@ class InexactZSCG(object):
             print('The input x + vu has shape:\t\t{}'.format(m_x.shape))
 
         # 2. Get objective functions
-        standard_loss = self.loss(self.model(x.view(1, x.shape[0], x.shape[1], x.shape[2])))         # Dim (1)
-        gaussian_loss = self.loss(self.model(m_x))                                                   # Dim (mk)
+        standard_loss = self.loss(self.model(x.view(1, *list(self.dim))))                   # Dim (1)
+        gaussian_loss = torch.zeros((mk)).to(self.device)                                   # Dim (mk)
+        if self.batch == -1:
+            gaussian_loss = self.loss(self.model(m_x))
+        else:
+            for n in range(mk//self.batch):
+                tmp_loss = self.loss(self.model(m_x[n*self.batch:(n+1)*self.batch, :]))
+                gaussian_loss[n*self.batch:(n+1)*self.batch] = tmp_loss.detach()                     # Dim (mk)
+
+        if verbose > 1:
+            print('Standard Loss is: {}'.format(standard_loss))
+            print('Gaussian Loss is: {}'.format(gaussian_loss))
+
 
         # 3. Compute Gv(x(k-1), chi(k-1), u(k))
         fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)                     # Dim (mk, 1)
@@ -427,7 +453,7 @@ class ClassicZSCG(object):
 
 
     def run(self, x, v, mk, ak , epsilon,
-            C = (0, 1), max_steps=100,
+            batch_size = -1, C = (0, 1), max_steps=100,
             stop_criterion=1e-3, verbose=0,
             additional_out=False, tqdm_disabled=False):
         """
@@ -438,6 +464,7 @@ class ClassicZSCG(object):
         mk:             (list)              Number of normal vector to generate at every step
         ak              (list)              Pseudo learning rate/momentum  every step
         epsilon:        (float)             The upper bound of the infinity norm
+        batch_size:     (int)               The maximum parallelization duting the gradient estimation. Default is -1 (=mk)
         C:              (tuple)             The boundaires of the pixel. Default is (0, 1)
         max_steps:      (int)               The maximum number of steps. Default is 100
         verbose:        (int)               Display information or not. Default is 0
@@ -451,6 +478,7 @@ class ClassicZSCG(object):
         self.dim = x.shape
         self.total_dim = torch.prod(torch.tensor(x.shape))
         self.epsilon = epsilon
+        self.batch = batch_size
 
         # 2. Init list of results
         losses, outs = [], [] # List of losses and outputs
@@ -524,32 +552,69 @@ class ClassicZSCG(object):
         mk:             (int)               The number of Gaussian Random Vector to generate
         verbose:        (bool)              Display information or not. Default is 0
         """
-        # 1. Create x(k-1) + v*u(k-1)
-        uk     = torch.empty(mk, self.total_dim).normal_(mean=0, std=1).to(self.device) # Dim (mk, channel*width*height)
-        img_u  = uk.reshape(mk, self.dim[0], self.dim[1], self.dim[2])                  # Dim (mk, channel, width, height)
-        img_x  = x.expand(mk, self.dim[0], self.dim[1], self.dim[2])                    # Dim (mk, channel, width, height)
-        m_x    = (img_x + v*img_u)                                                      # Dim (mk, channel, width, height)
 
-        if verbose > 1:
-            print('\nINSIDE GRADIENT')
-            print('The Gaussian vector uk has shape:{}'.format(uk.shape))
-            print('The input x has shape:\t\t{}'.format(x.shape))
-            print('The input x + vu has shape:\t{}'.format(m_x.shape))
+        # 1. Get objective functions
 
-        # 2. Get objective functions
-        standard_loss = self.loss(self.model(x.view(1, x.shape[0], x.shape[1], x.shape[2])))             # Dim (1)
-        gaussian_loss = self.loss(self.model(m_x))                                                       # Dim (mk)
+        if self.batch == -1:
+            # 1.a Create x(k-1) + v*u(k-1)
+            standard_loss = self.loss(self.model(x.view(1, *list(self.dim))))               # Dim (1)
+            uk     = torch.empty(mk, self.total_dim).normal_(mean=0, std=1).to(self.device) # Dim (mk, channel*width*height)
+            img_u  = uk.reshape(mk, self.dim[0], self.dim[1], self.dim[2])                  # Dim (mk, channel, width, height)
+            img_x  = x.expand(mk, self.dim[0], self.dim[1], self.dim[2])                    # Dim (mk, channel, width, height)
+            m_x    = (img_x + v*img_u)
+                                                               # Dim (mk, channel, width, height)
+            if verbose > 1:
+                print('\nINSIDE GRADIENT')
+                print('The Gaussian vector uk has shape:{}'.format(uk.shape))
+                print('The input x has shape:\t\t{}'.format(x.shape))
+                print('The input x + vu has shape:\t{}'.format(m_x.shape))
 
-        if verbose > 1:
-            print('Standard Loss is: {}'.format(standard_loss))
-            print('Gaussian Loss is: {}'.format(gaussian_loss))
+            # 1.b Compute loss
+            gaussian_loss = self.loss(self.model(m_x))
+
+            # 1.c Compute Gv(x(k-1), chi(k-1), u(k))
+            fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)        # Dim (mk, 1)
+            G = fv * uk                                                                     # Dim (mk, channel*width*height)
+
+            return torch.mean(G, axis=0).detach()
 
 
-        # 3. Compute Gv(x(k-1), chi(k-1), u(k))
-        fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)        # Dim (mk, 1)
-        G = fv * uk                                                                     # Dim (mk, channel*width*height)
+        else:
+            # 1.a Compute standard loss
+            standard_loss = self.loss(self.model(x.view(1, *list(self.dim))))                   # Dim (1)
+            G_tot = torch.zeros(mk//self.batch, self.total_dim).to(self.device)                 # Dim (n_batches, hannel*width*height)
 
-        return torch.mean(G, axis=0).detach()
+            #1.b Compute gaussian loss
+            for n in range(mk//self.batch):
+                from_, to_ = n*self.batch, (n+1)*self.batch
+
+                # 1.b Create batch x(k-1) + v*u(k-1)
+                uk     = torch.empty(self.batch, self.total_dim).normal_(mean=0, std=1).to(self.device) # Dim (bs, channel*width*height)
+                img_u  = uk.reshape(self.batch, self.dim[0], self.dim[1], self.dim[2])                  # Dim (bs, channel, width, height)
+                img_x  = x.expand(self.batch, self.dim[0], self.dim[1], self.dim[2])                    # Dim (bs, channel, width, height)
+                m_x    = (img_x + v*img_u)                                                              # Dim (bs, channel, width, height)
+
+                if verbose > 1:
+                    print('\nINSIDE GRADIENT')
+                    print('The Gaussian vector uk has shape:{}'.format(uk.shape))
+                    print('The input x has shape:\t\t{}'.format(x.shape))
+                    print('The input x + vu has shape:\t{}'.format(m_x.shape))
+
+                # 1.c Compute
+                tmp_gaussian_loss = self.loss(self.model(m_x)).detach()                                 # Dim(bs)
+
+                # 1.d Compute Gv(x(k-1), chi(k-1), u(k))
+                fv = ((tmp_gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)            # Dim (bs, 1)
+                G = fv * uk                                                                             # Dim (bs, channel*width*height)
+
+                if verbose > 1:
+                    print('Gaussian cycle loss has shape:\t{}'.format(tmp_gaussian_loss.shape))
+                    print('Function approx has shape:\t{}'.format(fv.shape))
+                    print('Gradient has shape:\t\t{}'.format(G.shape))
+
+                G_tot[n] = torch.mean(G, axis=0).detach()
+
+        return torch.mean(G_tot, axis=0).detach()
 
 
     def compute_CG(self, x, g, verbose):

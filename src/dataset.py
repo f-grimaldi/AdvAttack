@@ -35,7 +35,7 @@ class RGB(object):
 """MNIST dataset"""
 class MNIST(Dataset):
 
-    def __init__(self, root='data/mnist', transform='standard', upscaling_dim=(299, 299), ):
+    def __init__(self, root='data/mnist', transform='standard', upscaling_dim=(299, 299)):
         """
         Args:
         root                 (str)                      The root path of the dataset
@@ -59,7 +59,6 @@ class MNIST(Dataset):
         elif transform == 'upscale':
              return transforms.Compose([transforms.Resize(self.dim, PIL.Image.LANCZOS),
                                         transforms.ToTensor(),
-                                        transforms.Normalize((0.1307,), (0.3081,)),
                                         RGB()])
         else:
             if type(transform) == torch.transforms.Compose:
@@ -104,8 +103,8 @@ class MNIST(Dataset):
         for n in range(5):
             img = np.transpose(X[n].numpy(), (1, 2, 0))
             if img.shape[2] == 1:
-                img = img.reshape(img.shape[0]//2, -1)
-            ax[n].imshow(img*0.3081 + 0.1307)
+                img = img.reshape(img.shape[0], img.shape[1])
+            ax[n].imshow(img, cmap='gray')
             ax[n].set_title(str(y[n].item()))
         plt.show()
 
@@ -117,9 +116,9 @@ class CIFAR10(Dataset):
         """
         Args:
         root                 (str)                      The root path of the dataset
-        transform            (torchvision.transforms)    The transfrom to apply. Options are:
+        transform            (torchvision.transforms)   The transfrom to apply. Options are:
                                                                                 'standard':  (ToTensor). Default
-                                                                                 'upscale:   (Resize, ToTensor)
+                                                                                'upscale:   (Resize, ToTensor)
         upscaling_dim        (tuple)                    The dimension of the upscaling
         """
         self.dim = upscaling_dim
@@ -136,8 +135,7 @@ class CIFAR10(Dataset):
             return transforms.Compose([transforms.ToTensor()])
         if transform == 'upscale':
             return transforms.Compose([transforms.Resize(self.dim, PIL.Image.LANCZOS),
-                                       transforms.ToTensor(),
-                                       transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+                                       transforms.ToTensor()])
         else:
             if type(transform) == torch.transforms.Compose:
                 return transform
@@ -179,7 +177,7 @@ class CIFAR10(Dataset):
         fig, ax = plt.subplots(1, 5, figsize=(20, 6))
         for n in range(5):
             img = np.transpose(batch[n].numpy(), (1, 2, 0))
-            ax[n].imshow(img/2 + 0.5)
+            ax[n].imshow(img)
             ax[n].set_title(self.classes[example[1][n]])
         plt.show()
 

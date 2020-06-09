@@ -1,4 +1,27 @@
-def load_data(dataset, root, transform, batch_size, num_workers):
+def load_data(dataset, is_inception, root, transform, batch_size, num_workers):
+
+    if is_inception and transform == 'standard':
+        print('Trying to use inceptionV3 without upscaling!')
+        print('Use --transform "upscale" when --use_inception')
+        sys.exit(1)
+    if not is_inception and transform != 'standard':
+        print('Trying to use base models but calling data upscaling!')
+        print('Use --transform "standard" when not using "use_inception"')
+        sys.exit(1)
+
+    if is_inception and transform == 'upscale':
+        if dataset == 'mnist':
+            DataLoader = data.MNIST(root, transform=transform)
+            train, test = DataLoader.get_dataloader(batch_size=batch_size, num_workers=num_workers)
+        elif dataset == 'cifar10':
+            DataLoader = data.CIFAR10(root, transform=transform)
+            train, test = DataLoader.get_dataloader(batch_size=batch_size, num_workers=num_workers)
+        else:
+            print('Data not understood. Please use --data "mnist" or --data "cifar10"')
+            raise NotImplementedError
+            sys.exit(1)
+        return DataLoader, train, test
+
     if dataset == 'mnist':
         DataLoader = data.MNIST(root, transform=transform)
         train, test = DataLoader.get_dataloader(batch_size=batch_size, num_workers=num_workers)
@@ -27,13 +50,24 @@ def get_image(n, batch_size, device):
     return X, y
 
 
-def get_model(data):
-    if data == 'mnist':
-        model = models.MnistNet()
-        model.load_state_dict(torch.load('../models/mnistBaseV2_state_dict.pth'))
-    elif data == 'cifar10':
-        model = models.MyVGG()
-        model.load_state_dict(torch.load('../models/VGG16_cifar10_state_dict.pth'))
+def get_model(is_inception, data, device):
+    if not is_inception:
+        if data == 'mnist':
+            model = models.MnistNet()
+            model.load_state_dict(torch.load('../models/mnistBaseV2_state_dict.pth'))
+        elif data == 'cifar10':
+            model = models.MyVGG()
+            model.load_state_dict(torch.load('../models/VGG16_cifar10_state_dict.pth'))
+    else:
+        model = models.InceptionV3().net
+        model.fc = nn.Sequential(nn.Linear(2048, 512), nn.Dropout(0.4), nn.ReLU(),
+                                 nn.Linear(512, 64), nn.Dropout(0.4), nn.ReLU(),
+                                 nn.Linear(64, 10)).to(device)
+        if data == 'mnist':
+            model.load_state_dict(torch.load('../models/InceptionV3_MNIST_state_dict.pth'))
+        elif data == 'cifar10':
+            model.load_state_dict(torch.load('../models/InceptionV3_CIFAR10_state_dict.pth'))
+
     return model
 
 def check_output(X, y, model, device, is_softmax, dim):
@@ -41,12 +75,12 @@ def check_output(X, y, model, device, is_softmax, dim):
     y_pred = torch.argmax(out.cpu())
     if y_pred == y:
         if not is_softmax:
-            return y, nn.Softmax(dim=dim)(out)[0, y]
-        return y, out[0, y]
+            return y, nn.Softmax(dim=dim)(out)
+        return y, out
     print('Warnings: the model already misclassify current input. Setting the true target to the predicted one')
     if not is_softmax:
-        return y_pred, nn.Softmax(dim=dim)(out)[0, y_pred]
-    return y_pred, out[0, y_pred]
+        return y_pred, nn.Softmax(dim=dim)(out)
+    return y_pred, out
 
 def get_loss(loss, target_neuron, maximise, is_softmax, softmax_dim):
     if loss == 'MSE':
@@ -77,9 +111,14 @@ def get_optimizer(optim, model, loss, device):
 
 def get_optimization_params(optim, x, args):
     EPOCH = args.epochs
+    if args.batch_size == -1:
+        bs = args.m
+    else:
+        bs = args.batch_size
     if type(optim) == zeroOptim.InexactZSCG:
         params = {'x':x ,
                  'v':args.v, 'mk': [args.m]*EPOCH,
+                 'batch_size': bs,
                  'mu_k':[args.mu]*EPOCH , 'gamma_k':[args.gamma]*EPOCH,
                  'C':args.C , 'epsilon':args.epsilon,
                  'max_steps':EPOCH, 'max_t': args.max_t,
@@ -87,6 +126,7 @@ def get_optimization_params(optim, x, args):
     elif type(optim) == zeroOptim.ClassicZSCG:
         params = {'x':x ,
                  'v':args.v, 'mk': [args.m]*EPOCH,
+                 'batch_size': bs,
                  'ak': [args.alpha]*EPOCH,
                  'C':args.C , 'epsilon':args.epsilon,
                  'max_steps':EPOCH,
@@ -94,6 +134,7 @@ def get_optimization_params(optim, x, args):
     elif type(optim) == zeroOptim.ZeroSGD:
         params = {'x':x ,
                  'v':args.v, 'mk': [args.m]*EPOCH,
+                 'batch_size': bs,
                  'ak': [args.lr]*EPOCH,
                  'C':args.C , 'epsilon':args.epsilon,
                  'max_steps':EPOCH,
@@ -119,6 +160,8 @@ if __name__ == '__main__':
     import time
     import argparse
     import warnings
+    import json
+    from datetime import datetime
     from tqdm import tqdm
 
     cwd = os.getcwd()
@@ -162,7 +205,7 @@ if __name__ == '__main__':
     parser.add_argument('--transform',
                         type=str,               default='standard',
                         help='Default is standard. More detail on src/dataset.py')
-    parser.add_argument('--batch_size',
+    parser.add_argument('--data_batch_size',
                         type=int,               default=64,
                         help='Batch size loading the data. Default 64')
     parser.add_argument('--num_workers',
@@ -172,6 +215,9 @@ if __name__ == '__main__':
                         type=int,               default=0,
                         help='Number of the image to use as variable')
     # 1.c) Model args
+    parser.add_argument('--use_inception',
+                        action='store_true',    default=False,
+                        help='Tell to use the InceptionV3 model')
     parser.add_argument('--model_path',
                         type=str,               default='none',
                         help='Path of the model to attack')
@@ -193,76 +239,85 @@ if __name__ == '__main__':
                         type=str,               default='inexact',
                         help='Supported optimizer: inexact, classic, zero_sgd. Default is inexact')
     parser.add_argument('--C',
-                        type=tuple,         default=(0, 1),
+                        type=tuple,             default=(0, 1),
                         help='Iterable with the minimum and the maximum value of a pixel. Default is (0, 1)')
     parser.add_argument('--epsilon',
                         type=float,             default=0.5,
                         help='The upper bound of L_infinity or L2 norm')
     parser.add_argument('--verbose',
-                        type=int,             default=0,
+                        type=int,               default=0,
                         help='The level of verbose. 0 no verbose, 1 partial, 2 total. Default is 0')
     parser.add_argument('--epochs',
-                        type=int,             default=100,
+                        type=int,               default=100,
                         help='The maximum number of steps')
     parser.add_argument('--max_time',
-                        type=float,            default=1000,
+                        type=float,             default=1000,
                         help='The maximum number of seconds allowed to perform the attack')
     parser.add_argument('--tqdm_disabled',
-                        type=int,              default=0,
+                        type=int,               default=0,
                         help='If 1 the tqdm bar during the optimization procedure will not be displayed. Default is 0')
     # 1.d) General arguments in Balasubramanian Algortihms
     parser.add_argument('--v',
-                        type=float,            default=0.001,
+                        type=float,             default=0.001,
                         help='The gaussian smoothing parameters. Usually the lesser the more precise is the gradient. Default is 0.001')
     parser.add_argument('--m',
-                        type=int,              default=1000,
+                        type=int,               default=1000,
                         help='The number of gaussian vector generated  for computing the pseudo gradient. Warning: first cause of OutOfMemory. Default 1000')
+    parser.add_argument('--batch_size',
+                        type=int,               default=-1,
+                        help='Batch size during gradient estimation. Default is -1 (= args.m)')
     # 1.e) Classic ZSCG args
     parser.add_argument('--alpha',
-                        type=float,            default=0.2,
+                        type=float,             default=0.2,
                         help='The momentum/lr of Classic ZSCG. Must be in (0, 1). Suggested is 1/sqrt(EPOCH). Default is 0.2. Only for Classic ZSCG')
     # 1.f) Inexact ZSGG args
     parser.add_argument('--gamma',
-                        type=float,            default=2,
+                        type=float,             default=2,
                         help='Gradient update rule inside ICG. Suggested is 2L. Only for Inexact ZSCG')
     parser.add_argument('--mu',
-                        type=float,            default=1/400,
+                        type=float,             default=1/400,
                         help='The first stopping criterion inside ICG. Only for Inexact ZSCG')
     parser.add_argument('--max_t',
-                        type=int,              default=50,
+                        type=int,               default=50,
                         help='The maximum number of steps inside ICG. Default is 50. Only for Inexact ZSCG')
     # 1.g) Zero SGD args
     parser.add_argument('--lr',
                         type=float,             default=0.1,
                         help='The learning rate for the Zero SGD. Default is 0.01. Only for Zero SGD')
+    # 1.h) Logs Parameters
+    parser.add_argument('--logs_path',
+                        type=str,             default='../logs',
+                        help='The path where to save the run logs')
 
     args = parser.parse_args()
-    print('Arguments are:\n{}'.format(args))
+    print('1. Arguments are:\n{}\n'.format(args))
 
     # 2. Set device and sees
     torch.manual_seed(args.seed)
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     torch.manual_seed(args.seed)
     device = torch.device("cuda" if use_cuda else "cpu")
-    print('Device is: {}'.format(device))
+    print('2. Device is: {}\n'.format(device))
 
     # 3. Load data
+    print('3. Loading data...')
     root = '{}{}'.format(args.root, args.data)
-    dataloader, train, test = load_data(args.data, root, args.transform, args.batch_size, args.num_workers)
-
+    dataloader, train, test = load_data(args.data, args.use_inception, root, args.transform, args.data_batch_size, args.num_workers)
     # 4. Loading the network
     if args.model_path != 'none':
         try:
+
             net = torch.load(args.model_path).to(device)
         except:
             print('Couldnt load the model from path {}. Either wrong path or model class not found in src/models.')
             print('Using default model for given dataset')
             model = get_model(args.data).to(device)
     else:
-        model = get_model(args.data).to(device)
+        model = get_model(args.use_inception, args.data, device).to(device)
+    model.eval()
 
     # 4. Chose image to use as variable
-    X, y = get_image(args.image_number, args.batch_size, device)
+    X, y = get_image(args.image_number, args.data_batch_size, device)
 
     y, original_out = check_output(X, y, model, device, args.is_softmax, args.softmax_dim)
 
@@ -278,14 +333,24 @@ if __name__ == '__main__':
         print(sys.exit(1))
 
     # 7. Set optimizer and run parameters
+    print('\n4. Starting the attack')
     optim = get_optimizer(args.optimizer, model, loss_fn, device)
     params = get_optimization_params(optim, X, args)
 
     # 8. Perform the run
+    start_time = time.time()
     new_x, loss_list, out_list = optim.run(**params)
+    end_time = time.time() - start_time
+
 
     # 9. Display results
-    fig, ax = plt.subplots(1, 2, figsize=(15, 6))
+    new_out = model(new_x.view(1, *list(new_x.shape)))
+    if not args.is_softmax:
+        softmax = nn.Softmax(dim=args.softmax_dim)
+        new_out = softmax(new_out)
+    new_y = torch.argmax(new_out)
+
+    fig, ax = plt.subplots(1, 3, figsize=(22, 6))
     # 9.a) Loss
     ax[0].plot(loss_list)
     ax[0].set_title('Loss curve')
@@ -293,16 +358,61 @@ if __name__ == '__main__':
     ax[0].set_xlabel('Step')
     ax[0].grid()
 
-    # 9.b) Image
-    new_out = model(new_x.view(1, *list(new_x.shape)))
-    if not args.is_softmax:
-        softmax = nn.Softmax(dim=args.softmax_dim)
-        new_out = softmax(new_out)
-    new_y = torch.argmax(new_out)
+    # 9.b) Original image
+    if X.shape[0] > 1:
+        ax[1].imshow(np.transpose(X.cpu().numpy(), (1, 2, 0)))
+    else:
+        ax[1].imshow(X.cpu().numpy().reshape(X.shape[1], X.shape[2]))
+    ax[1].set_title('Before attack\nP(X={}) = {:.3f}\nP(X={}) = {:.3f}'.format(y, original_out[0, y], new_y, original_out[0, new_y]))
+
+    # 9.b) New Image
+    print('\n5. Attack is ended. Displaying results...')
+    print('\tInterval pixel values of modified X is: [{:.4f}, {:.3f}]'.format(new_x.min(), new_x.max()))
+    if args.target_neuron == -1:
+        if y != new_y.cpu():
+            success = 1
+            print('\tAttack has been carried out succesfully after {:4f} seconds ({} steps)'.format(end_time, len(loss_list)))
+            print('\t\tThe initial class was:   {}'.format(y))
+            print('\t\tThe new class is:        {}'.format(new_y))
+        else:
+            success = 0
+            print('\tAfter {:.3s} seconds and {} steps the optimizer could not perform the attack'.format(end_time, len(loss_list)))
+            print('\tAttack failed!')
+    else:
+        if args.target_neuron == new_y.cpu():
+            success = 1
+            print('\tAttack has been carried out succesfully after {:4f} seconds ({} steps)'.format(end_time, len(loss_list)))
+            print('\t\tThe initial class was:   {}'.format(y))
+            print('\t\tThe new class is:        {}'.format(new_y))
+        else:
+            success = 0
+            print('After {:.3f} seconds and {} steps the optimizer could not perform the attack'.format(end_time, len(loss_list)))
+            print('The neuron target has activation {:.4f} while the maximum activation neuron is {} with {:.4f}'.format(new_out[0, args.target_neuron],
+                                                                                                                          new_y,
+                                                                                                                          new_out[0, new_y]))
+            print('Attack failed!')
 
     if new_x.shape[0] > 1:
-        ax[1].imshow(np.transpose(new_x.cpu().numpy(), 1, 2, 0))
+        ax[2].imshow(np.transpose(new_x.cpu().numpy(), (1, 2, 0)))
     else:
-        ax[1].imshow(new_x.cpu().numpy().reshape(new_x.shape[1], new_x.shape[2]))
-    ax[1].set_title('After attack\nP(X={}) = {:.3f}\nP(X={}) = {:.3f}'.format(y, new_out[0, y], new_y, new_out[0, new_y]))
+        ax[2].imshow(new_x.cpu().numpy().reshape(new_x.shape[1], new_x.shape[2]))
+    ax[2].set_title('After attack\nP(X={}) = {:.3f}\nP(X={}) = {:.3f}'.format(y, new_out[0, y], new_y, new_out[0, new_y]))
     plt.show()
+
+    # 10. Save logs
+    logs = {'Dataset': args.data,
+            'Inception': args.use_inception,
+            'Image number': args.image_number,
+            'Optimizer': args.optimizer,
+            'Loss': args.loss,
+            'Specific class attacked': args.target_neuron,
+            'Results': {'Success': success, 'Time taken': end_time, 'Steps': len(loss_list)},
+            'All_config_args': vars(args)}
+
+    now = datetime.now()
+    log_time = now.strftime("%d_%m_%Y_%Hh_%Mm_%Ss")
+    LOG_PATH = '{}/test_py_logs_{}'.format(args.logs_path, log_time)
+    print('\n6. Saving log file and figure at {}'.format(LOG_PATH))
+    plt.savefig('{}.jpg'.format(LOG_PATH))
+    with open('{}.txt'.format(LOG_PATH), 'w') as file:
+        json.dump(logs, file)
