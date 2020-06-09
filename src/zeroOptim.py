@@ -134,21 +134,21 @@ class ZeroSGD(object):
             print('The input x + vu has shape:\t{}'.format(m_x.shape))
 
         # 3. Get objective functions
-        standard_loss = self.loss(self.model(x.view(1, *list(self.dim))))                   # Dim (1)
-        gaussian_loss = torch.zeros((mk)).to(self.device)                                   # Dim (mk)
+        standard_loss = self.loss(self.model(x.view(1, *list(self.dim))))               # Dim (1)
+        gaussian_loss = torch.zeros((mk)).to(self.device)                               # Dim (mk)
         if self.batch == -1:
             gaussian_loss = self.loss(self.model(m_x))
         else:
             for n in range(mk//self.batch):
                 tmp_loss = self.loss(self.model(m_x[n*self.batch:(n+1)*self.batch, :]))
-                gaussian_loss[n*self.batch:(n+1)*self.batch] = tmp_loss.detach()                     # Dim (mk)
+                gaussian_loss[n*self.batch:(n+1)*self.batch] = tmp_loss.detach()        # Dim (mk)
 
         if verbose > 1:
             print('Standard Loss is: {}'.format(standard_loss))
             print('Gaussian Loss is: {}'.format(gaussian_loss))
 
         # 4. Compute gradient approximation
-        Gk  = self.compute_Gk(standard_loss, gaussian_loss, v, uk)                       # Dim (channel*width*height)
+        Gk  = self.compute_Gk(standard_loss, gaussian_loss, v, uk)                      # Dim (channel*width*height)
 
         # 5. Call verbose
         if verbose > 1:
@@ -187,9 +187,9 @@ class ZeroSGD(object):
         verbose:        (bool)              Display information or not. Default is 0
         """
         # Compute Gv(x(k-1), chi(k-1), u(k))
-        fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)             # Dim (mk, 1)
-        G =  fv * uk                                                                         # Dim (mk, channel*width*height)
-        return torch.mean(G, axis=0)                                                         # Dim (channel*width*height)
+        fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)        # Dim (mk, 1)
+        G =  fv * uk                                                                    # Dim (mk, channel*width*height)
+        return torch.mean(G, axis=0)                                                    # Dim (channel*width*height)
 
 
 """
@@ -383,7 +383,7 @@ class InexactZSCG(object):
             # 2.1 Compute gradient
             grad = g + gamma*(y_old - x.view(-1))
             # 2.2 Move to the boundaries in one shot
-            y_new = self.check_boundaries(self.x_original.view(-1) - self.epsilon*torch.sign(grad))
+            y_new = self.project_boundaries(self.x_original.view(-1) - self.epsilon*torch.sign(grad))
             # 2.3 Compute new function value
             h = torch.dot(grad, y_new - y_old)
 
@@ -401,7 +401,7 @@ class InexactZSCG(object):
                 y_old = (t-1)/(t+1)*y_old + 2/(t+1)*y_new
                 t += 1
 
-        return self.check_boundaries(y_old.detach())
+        return self.project_boundaries(y_old.detach())
 
     """
     Create the boundaries of our constraint optimization problem
@@ -423,7 +423,7 @@ class InexactZSCG(object):
     """
     Check the boundaries of our constraint optimization problem
     """
-    def check_boundaries(self, x):
+    def project_boundaries(self, x):
         x[x > self.C[1]] = self.C[1]
         x[x < self.C[0]] = self.C[0]
         return x
@@ -453,7 +453,7 @@ class ClassicZSCG(object):
 
 
     def run(self, x, v, mk, ak , epsilon,
-            batch_size = -1, C = (0, 1), max_steps=100,
+            batch_size = -1, C = (0, 1), max_steps=100, L_type=-1,
             stop_criterion=1e-3, verbose=0,
             additional_out=False, tqdm_disabled=False):
         """
@@ -467,18 +467,23 @@ class ClassicZSCG(object):
         batch_size:     (int)               The maximum parallelization duting the gradient estimation. Default is -1 (=mk)
         C:              (tuple)             The boundaires of the pixel. Default is (0, 1)
         max_steps:      (int)               The maximum number of steps. Default is 100
+        L_type          (int)               L-norm used to compute bounds. -1 stands for infinity norm
         verbose:        (int)               Display information or not. Default is 0
         additional_out  (bool)              Return also all the x. Default is False
         tqdm_disable    (bool)              Disable the tqdm bar. Default is False
         """
         x = x.to(self.device)
+        # Set the boundaires of the pixels
+        self.C = C
 
         # 1. Init class attributes
-        self.create_boundaries(x, epsilon, C) # Set x_original min and max
+        # self.create_boundaries(x, L_type, epsilon, C) # Set x_original min and max
         self.dim = x.shape
         self.total_dim = torch.prod(torch.tensor(x.shape))
         self.epsilon = epsilon
         self.batch = batch_size
+        self.x_original = x.clone().to(self.device) # dim = (n_channel, width, height)
+        self.L_type = L_type
 
         # 2. Init list of results
         losses, outs = [], [] # List of losses and outputs
@@ -528,7 +533,7 @@ class ClassicZSCG(object):
         # Compute the approximated gradient
         g = self.compute_Gk(x, v, mk, verbose)
         # Call the inexact conditional gradient
-        x_g = self.compute_CG(x, g, verbose).reshape(x.shape[0], x.shape[1], x.shape[2])
+        x_g = self.compute_CG(g, verbose).reshape(x.shape[0], x.shape[1], x.shape[2])
         x_new = (1-ak)*x + ak*x_g
 
         if verbose > 1:
@@ -578,7 +583,6 @@ class ClassicZSCG(object):
 
             return torch.mean(G, axis=0).detach()
 
-
         else:
             # 1.a Compute standard loss
             standard_loss = self.loss(self.model(x.view(1, *list(self.dim))))                   # Dim (1)
@@ -617,19 +621,31 @@ class ClassicZSCG(object):
         return torch.mean(G_tot, axis=0).detach()
 
 
-    def compute_CG(self, x, g, verbose):
+    def compute_CG(self, g, verbose):
         """
         Args:
-        Name            Type                Description
-        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
-        g:              (torch.tensor)      The approximated gradient. Should be a 1D tensor
+        Name         Type                Description
+        g:           (torch.tensor)      The approximated gradient. Should be a 1D tensor
         """
-        # 1. Init variables
-        x = x.view(-1) # dim = (n_channel * width * height)
-        u = torch.rand(self.total_dim).to(self.device)*(self.max.view(-1) - self.min.view(-1)) + self.min.view(-1)
 
-        # 2. Main cycle
-        x_new = self.check_boundaries(self.x_original.view(-1) - self.epsilon*torch.sign(g))
+        # Infinity norm
+        if self.L_type == -1:
+            x_new = self.x_original.view(-1) - self.epsilon*torch.sign(g)
+        # L1 norm
+        elif self.L_type == 1:
+            raise NotImplementedError
+        elif self.L_type == 2:
+            x_new = self.x_original.view(-1) - (self.epsilon*g)/torch.norm(g, 2)
+        # Generic Lp norm (1 < p < +inf)
+        else:
+            p = self.L_type
+            gp = torch.abs(g)**(1/p-1)
+            h = torch.sign(g) * (gp) / torch.norm(gp, p)
+            x_new = self.x_original.view(-1) - self.epsilon*h
+
+        # Enforce pixel boundaries
+        x_new[x_new < self.C[0]] = self.C[0]
+        x_new[x_new > self.C[1]] = self.C[1]
 
         if verbose > 1:
             print('\nINSIDE CG')
@@ -640,30 +656,6 @@ class ClassicZSCG(object):
 
         return x_new.detach()
 
-    """
-    Create the boundaries of our constraint optimization problem
-    """
-    def create_boundaries(self, x, epsilon, C):
-        """
-        Args:
-        Name            Type                Description
-        x:              (torch.tensor)      The original image. Should be a 3D tensor (img)
-        epsilon:        (float)             The maximum value of ininity norm.
-        """
-        self.x_original = x.clone().to(self.device)           # dim = (n_channel, width, height)
-        self.max = (self.x_original+epsilon).to(self.device)  # dim = (n_channel, width, height)
-        self.min = (self.x_original-epsilon).to(self.device)  # dim = (n_channel, width, height)
-        self.C = C
-        self.max[self.max > C[1]] = C[1]
-        self.min[self.min < C[0]] = C[0]
-
-    """
-    Check if the boundaries are respected
-    """
-    def check_boundaries(self, x):
-        x[x > self.C[1]] = self.C[1]
-        x[x < self.C[0]] = self.C[0]
-        return x
 
 
 if __name__ == '__main__':
