@@ -117,7 +117,6 @@ class ZooLoss(Loss):
         else:
             # Untargeted
             CLN = conf_log[:, self.neuron] - torch.max(conf_log_neg, axis=1).values
-            print(CLN)
             return torch.max(CLN, torch.zeros_like(CLN)-self.transf)
 
 
