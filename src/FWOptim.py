@@ -114,7 +114,7 @@ class FWOptim():
             if self.L_type == 1:
                 raise NotImplementedError
             p = self.L_type
-            v = self.x_ori.view(-1) - (self.epsilon*torch.abs(m)**(1/(p-1))/torch.sum(torch.abs(m)**(p/p-1))**(1/p)
+            v = self.x_ori.view(-1) - torch.sign(m)*(self.epsilon*torch.abs(m)**(1/(p-1))/torch.sum(torch.abs(m)**(p/p-1))**(1/p)
 
         # 4. Update x
         x = x.view(-1) + gamma*(v-x.view(-1))

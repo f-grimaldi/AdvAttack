@@ -112,20 +112,22 @@ def get_optimizer(optim, model, loss, device):
 def get_optimization_params(optim, x, args):
     EPOCH = args.epochs
     if args.batch_size == -1:
-        bs = args.m
+        bs = args.n_gradient
     else:
         bs = args.batch_size
     if type(optim) == zeroOptim.InexactZSCG:
         params = {'x':x ,
-                 'v':args.v, 'mk': [args.m]*EPOCH,
+                 'v':args.v, 'n_gradient': [args.n_gradient]*EPOCH,
                  'batch_size': bs,
                  'mu_k':[args.mu]*EPOCH , 'gamma_k':[args.gamma]*EPOCH,
                  'C':args.C , 'epsilon':args.epsilon,
+                 'L_type': args.L_type,
                  'max_steps':EPOCH, 'max_t': args.max_t,
                  'tqdm_disabled':args.tqdm_disabled, 'verbose': args.verbose}
     elif type(optim) == zeroOptim.ClassicZSCG:
         params = {'x':x ,
-                 'v':args.v, 'mk': [args.m]*EPOCH,
+                 'v':args.v, 'n_gradient': [args.n_gradient]*EPOCH,
+                 'L_type': args.L_type,
                  'batch_size': bs,
                  'ak': [args.alpha]*EPOCH,
                  'C':args.C , 'epsilon':args.epsilon,
@@ -133,8 +135,9 @@ def get_optimization_params(optim, x, args):
                  'tqdm_disabled':args.tqdm_disabled, 'verbose': args.verbose}
     elif type(optim) == zeroOptim.ZeroSGD:
         params = {'x':x ,
-                 'v':args.v, 'mk': [args.m]*EPOCH,
+                 'v':args.v, 'n_gradient': [args.n_gradient]*EPOCH,
                  'batch_size': bs,
+                 'L_type': args.L_type,
                  'ak': [args.lr]*EPOCH,
                  'C':args.C , 'epsilon':args.epsilon,
                  'max_steps':EPOCH,
@@ -241,6 +244,9 @@ if __name__ == '__main__':
     parser.add_argument('--C',
                         type=tuple,             default=(0, 1),
                         help='Iterable with the minimum and the maximum value of a pixel. Default is (0, 1)')
+    parser.add_argument('--L_type',
+                        type=int,               default=-1,
+                        help='The norm type. -1 equals infinity notm. Default -1')
     parser.add_argument('--epsilon',
                         type=float,             default=0.5,
                         help='The upper bound of L_infinity or L2 norm')
@@ -260,12 +266,12 @@ if __name__ == '__main__':
     parser.add_argument('--v',
                         type=float,             default=0.001,
                         help='The gaussian smoothing parameters. Usually the lesser the more precise is the gradient. Default is 0.001')
-    parser.add_argument('--m',
+    parser.add_argument('--n_gradient',
                         type=int,               default=1000,
                         help='The number of gaussian vector generated  for computing the pseudo gradient. Warning: first cause of OutOfMemory. Default 1000')
     parser.add_argument('--batch_size',
                         type=int,               default=-1,
-                        help='Batch size during gradient estimation. Default is -1 (= args.m)')
+                        help='Batch size during gradient estimation. Default is -1 (= args.n_gradient)')
     # 1.e) Classic ZSCG args
     parser.add_argument('--alpha',
                         type=float,             default=0.2,
@@ -295,7 +301,6 @@ if __name__ == '__main__':
     # 2. Set device and sees
     torch.manual_seed(args.seed)
     use_cuda = not args.no_cuda and torch.cuda.is_available()
-    torch.manual_seed(args.seed)
     device = torch.device("cuda" if use_cuda else "cpu")
     print('2. Device is: {}\n'.format(device))
 
@@ -353,7 +358,7 @@ if __name__ == '__main__':
     fig, ax = plt.subplots(1, 3, figsize=(22, 6))
     # 9.a) Loss
     ax[0].plot(loss_list)
-    ax[0].set_title('Loss curve')
+    ax[0].set_title('Loss curve with {}'.format(args.optimizer))
     ax[0].set_ylabel('Loss {}'.format(args.loss))
     ax[0].set_xlabel('Step')
     ax[0].grid()
@@ -368,20 +373,27 @@ if __name__ == '__main__':
     # 9.b) New Image
     print('\n5. Attack is ended. Displaying results...')
     print('\tInterval pixel values of modified X is: [{:.4f}, {:.3f}]'.format(new_x.min(), new_x.max()))
+    if args.L_type == 2:
+        l2_dist = torch.norm(X-new_x)
+        print('\tThe L2 distance is: {:.3f}'.format(float(l2_dist)))
+    elif args.L_type == -1:
+        linf_dist = torch.max(torch.abs(X-new_x))
+        print('\tThe computed upper bound of the inifiny norm is: {:.3f}'.format(linf_dist))
+    print('\t')
     if args.target_neuron == -1:
         if y != new_y.cpu():
             success = 1
-            print('\tAttack has been carried out succesfully after {:4f} seconds ({} steps)'.format(end_time, len(loss_list)))
+            print('\tAttack has been carried out succesfully after {:.3f} seconds ({} steps)'.format(end_time, len(loss_list)))
             print('\t\tThe initial class was:   {}'.format(y))
             print('\t\tThe new class is:        {}'.format(new_y))
         else:
             success = 0
-            print('\tAfter {:.3s} seconds and {} steps the optimizer could not perform the attack'.format(end_time, len(loss_list)))
+            print('\tAfter {:.3f} seconds and {} steps the optimizer could not perform the attack'.format(end_time, len(loss_list)))
             print('\tAttack failed!')
     else:
         if args.target_neuron == new_y.cpu():
             success = 1
-            print('\tAttack has been carried out succesfully after {:4f} seconds ({} steps)'.format(end_time, len(loss_list)))
+            print('\tAttack has been carried out succesfully after {:.3f} seconds ({} steps)'.format(end_time, len(loss_list)))
             print('\t\tThe initial class was:   {}'.format(y))
             print('\t\tThe new class is:        {}'.format(new_y))
         else:
@@ -413,6 +425,6 @@ if __name__ == '__main__':
     log_time = now.strftime("%d_%m_%Y_%Hh_%Mm_%Ss")
     LOG_PATH = '{}/test_py_logs_{}'.format(args.logs_path, log_time)
     print('\n6. Saving log file and figure at {}'.format(LOG_PATH))
-    plt.savefig('{}.jpg'.format(LOG_PATH))
+    fig.savefig('{}.jpg'.format(LOG_PATH))
     with open('{}.txt'.format(LOG_PATH), 'w') as file:
         json.dump(logs, file)
