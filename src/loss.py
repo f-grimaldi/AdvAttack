@@ -95,15 +95,15 @@ class ZooLoss(Loss):
         if len(conf.shape) == 1:
             conf = conf.view(-1, 1)
 
-        # Deal with non-softmax model output
-        if not self.is_softmax:
-            conf = nn.Softmax(dim=self.dim)(conf)
-
         # Avoid loss to be 0 in case of equal probability
         if self.maximise:
             conf[:, self.neuron] -= 1e-10
         elif not self.maximise:
             conf[:, self.neuron] += 1e-10
+
+        # Deal with non-softmax model output
+        if not self.is_softmax:
+            conf = nn.Softmax(dim=self.dim)(conf)
         
         # Compute log and neg_log matrices
         conf_log = torch.log(conf)
