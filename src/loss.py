@@ -108,14 +108,11 @@ class ZooLoss(Loss):
         # Compute log and neg_log matrices
         conf_log = torch.log(conf)
         conf_log_neg = torch.cat((conf_log[:, :self.neuron], conf_log[:, self.neuron+1:]), axis=1)
-        print(conf)
-        print(conf_log)
 
         # Compute Loss
         if self.maximise:
             # Targeted
             CLN = torch.max(conf_log_neg, axis=1).values - conf_log[:, self.neuron]
-            print(CLN)
             return torch.max(CLN, torch.zeros_like(CLN)-self.transf)
         else:
             # Untargeted
