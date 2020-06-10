@@ -100,16 +100,32 @@ class ZooLoss(Loss):
             conf = nn.Softmax(dim=self.dim)(conf)
 
         # Compute log and neg_log matrices
-        conf[:, self.neuron] -= 1e-5  # avoid loss to be 0 in case of equal probability
+        # avoid loss to be 0 in case of equal probability
+        if self.maximise:
+            conf[:, self.neuron] -= 1e-10
+        elif not self.maximise:
+            conf[:, self.neuron] += 1e-10
         conf_log = torch.log(conf)
         conf_log_neg = torch.cat((conf_log[:, :self.neuron], conf_log[:, self.neuron+1:]), axis=1)
+        print(conf)
+        print(conf_log)
 
         # Compute Loss
         if self.maximise:
             # Targeted
             CLN = torch.max(conf_log_neg, axis=1).values - conf_log[:, self.neuron]
+            print(CLN)
             return torch.max(CLN, torch.zeros_like(CLN)-self.transf)
         else:
             # Untargeted
             CLN = conf_log[:, self.neuron] - torch.max(conf_log_neg, axis=1).values
+            print(CLN)
             return torch.max(CLN, torch.zeros_like(CLN)-self.transf)
+
+
+if __name__ == '__main__':
+    mine = (1.999999, 2.2, 2.2, 2.2)
+    mine = torch.tensor(mine).view(1, -1)
+    print(mine)
+    adv_loss = ZooLoss(0, maximise=1)
+    print(adv_loss.forward(mine))
