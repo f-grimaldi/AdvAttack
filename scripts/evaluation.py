@@ -34,21 +34,6 @@ def load_data(dataset, is_inception, root, transform, batch_size, num_workers):
         sys.exit(1)
     return DataLoader, train, test
 
-def get_image(n, batch_size, device):
-    if n >= 10000:
-        print('The validation example are 10000. Please select an image index under 10000...')
-        raise NotImplementedError
-        sys.exit(1)
-    n_batch = n//batch_size
-    n_example = n%batch_size
-    for i, batch in enumerate(test):
-        if i == n_batch:
-            X, y = batch[0][n_example].to(device), batch[1][n_example]
-            break
-        else:
-            continue
-    return X, y
-
 
 def get_model(is_inception, data, device):
     if not is_inception:
@@ -154,6 +139,137 @@ def get_optimization_params(optim, x, args):
     return params
 
 
+def get_data(n_example, data_batch_size, dataloader, device):
+
+    n_batch = n_example//data_batch_size
+    X_ori = torch.Tensor()
+    y_ori = torch.Tensor().long()
+    for n, batch in enumerate(dataloader):
+        if n == n_batch:
+            break
+        y_ori = torch.cat((y_ori, batch[1]))
+        X_ori = torch.cat((X_ori, batch[0]))
+    return X_ori, y_ori
+
+
+def untarget_run(args, model, X_ori, y_ori, device):
+    success = []
+    loss_list = []
+    epsilon = []
+    time_t = []
+    for X, y in tqdm(zip(X_ori, y_ori)):
+
+        # a. Init loss, optimizer and params
+        loss_fn =  get_loss(args.loss, int(y), 0, args.is_softmax, args.softmax_dim)
+        optim = get_optimizer(args.optimizer, model, loss_fn, device)
+        params = get_optimization_params(optim, X, args)
+
+        # b. DO run
+        start_time = time.time()
+        new_x, losses, out_list = optim.run(**params)
+        end_time = time.time() - start_time
+
+        loss_list.append(losses[-1])
+        time_t.append(end_time)
+
+        new_out = model(new_x.view(1, *list(new_x.shape)))
+        if not args.is_softmax:
+            softmax = nn.Softmax(dim=args.softmax_dim)
+            new_out = softmax(new_out)
+        new_y = torch.argmax(new_out)
+
+        if int(new_y) != int(y):
+            success.append(1)
+        else:
+            success.append(0)
+
+        if args.L_type == 2:
+            l2_dist = torch.norm(X-new_x.cpu())
+            if float(l2_dist) > 0:
+                epsilon.append(l2_dist)
+        elif args.L_type == -1:
+            linf_dist = torch.max(torch.abs(X-new_x.cpu()))
+            epsilon.append(linf_dist)
+
+    return success, loss_list, epsilon, time_t
+
+def target_run(args, model, X_ori, y_ori, device):
+    success = []
+    loss_list = []
+    epsilon = []
+    time_t = []
+    for X, y in tqdm(zip(X_ori, y_ori)):
+        for i in range(10):
+            if y == i:
+                continue
+            # a. Init loss, optimizer and params
+            loss_fn =  get_loss(args.loss, i, 1, args.is_softmax, args.softmax_dim)
+            optim = get_optimizer(args.optimizer, model, loss_fn, device)
+            params = get_optimization_params(optim, X, args)
+
+            # b. DO run
+            start_time = time.time()
+            new_x, losses, out_list = optim.run(**params)
+            end_time = time.time() - start_time
+
+            loss_list.append(losses[-1])
+            time_t.append(end_time)
+
+            new_out = model(new_x.view(1, *list(new_x.shape)))
+            if not args.is_softmax:
+                softmax = nn.Softmax(dim=args.softmax_dim)
+                new_out = softmax(new_out)
+            new_y = torch.argmax(new_out)
+
+            if int(new_y) == i:
+                success.append(1)
+            else:
+                success.append(0)
+
+            if args.L_type == 2:
+                l2_dist = torch.norm(X-new_x.cpu())
+                epsilon.append(l2_dist)
+            elif args.L_type == -1:
+                linf_dist = torch.max(torch.abs(X-new_x.cpu()))
+                epsilon.append(linf_dist)
+
+    return success, loss_list, epsilon, time_t
+
+
+
+def main_body(args, device):
+
+    # 1. Get dataloader
+    print('3. Loading data...')
+    root = '{}{}'.format(args.root, args.data)
+    dataloader, train, test = load_data(args.data, args.use_inception, root, args.transform, args.data_batch_size, args.num_workers)
+
+
+    print('4. Loading model...')
+    # 2. Loading the network
+    if args.model_path != 'none':
+        try:
+
+            net = torch.load(args.model_path).to(device)
+        except:
+            print('Couldnt load the model from path {}. Either wrong path or model class not found in src/models.')
+            print('Using default model for given dataset')
+            model = get_model(args.data).to(device)
+    else:
+        model = get_model(args.use_inception, args.data, device).to(device)
+    model.eval()
+
+    # 3. Get data
+    X_ori, y_ori = get_data(args.n_example, args.data_batch_size, test, device)
+
+    print('5. Starting the evaluation')
+    # Perform run
+    if not args.maximise:
+        success, loss, epsilon, time = untarget_run(args, model, X_ori, y_ori, device)
+    else:
+        success, loss, epsilon, time = target_run(args, model, X_ori, y_ori, device)
+
+    return success, loss, epsilon, time
 
 if __name__ == '__main__':
 
@@ -209,14 +325,14 @@ if __name__ == '__main__':
                         type=str,               default='standard',
                         help='Default is standard. More detail on src/dataset.py')
     parser.add_argument('--data_batch_size',
-                        type=int,               default=64,
-                        help='Batch size loading the data. Default 64')
+                        type=int,               default=50,
+                        help='Batch size loading the data. Default 50')
     parser.add_argument('--num_workers',
                         type=int,               default=0,
                         help='Number of workers for the dataloader. Default 0')
-    parser.add_argument('--image_number',
-                        type=int,               default=0,
-                        help='Number of the image to use as variable')
+    parser.add_argument('--n_example',
+                        type=int,               default=100,
+                        help='Number of image used for the evaluation. Default is 100')
     # 1.c) Model args
     parser.add_argument('--use_inception',
                         action='store_true',    default=False,
@@ -228,9 +344,9 @@ if __name__ == '__main__':
     parser.add_argument('--loss',
                         type=str,               default='Zoo',
                         help='The type of loss. Either "Zoo" or "MSE". Default is "Zoo"')
-    parser.add_argument('--target_neuron',
-                        type=int,               default=-1,
-                        help='If given a positive integer a specific/target attack is set to maximise the outcome of that neuron. Default is -1')
+    parser.add_argument('--maximise',
+                        type=int,               default=0,
+                        help='Tell to perform an untargeted attack (0) or targeted(1). Default is 0')
     parser.add_argument('--is_softmax',
                         action='store_true',    default=False,
                         help='Tell the loss that the model output is a propbability distribution already')
@@ -260,8 +376,8 @@ if __name__ == '__main__':
                         type=float,             default=1000,
                         help='The maximum number of seconds allowed to perform the attack')
     parser.add_argument('--tqdm_disabled',
-                        type=int,               default=0,
-                        help='If 1 the tqdm bar during the optimization procedure will not be displayed. Default is 0')
+                        type=int,               default=1,
+                        help='If 1 the tqdm bar during the optimization procedure will not be displayed. Default is 1')
     # 1.d) General arguments in Balasubramanian Algortihms
     parser.add_argument('--v',
                         type=float,             default=0.001,
@@ -292,142 +408,39 @@ if __name__ == '__main__':
                         help='The learning rate for the Zero SGD. Default is 0.01. Only for Zero SGD')
     # 1.h) Logs Parameters
     parser.add_argument('--logs_path',
-                        type=str,             default='../logs',
+                        type=str,             default='../logs/evaluation_logs',
                         help='The path where to save the run logs')
 
     args = parser.parse_args()
-    print('1. Arguments are:\n{}\n'.format(args))
+    print('1. Arguments are:\n\n{}\n'.format(args))
 
     # 2. Set device and sees
     torch.manual_seed(args.seed)
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-    print('2. Device is: {}\n'.format(device))
+    print('2. Device is: {}'.format(device))
 
-    # 3. Load data
-    print('3. Loading data...')
-    root = '{}{}'.format(args.root, args.data)
-    dataloader, train, test = load_data(args.data, args.use_inception, root, args.transform, args.data_batch_size, args.num_workers)
-    # 4. Loading the network
-    if args.model_path != 'none':
-        try:
-
-            net = torch.load(args.model_path).to(device)
-        except:
-            print('Couldnt load the model from path {}. Either wrong path or model class not found in src/models.')
-            print('Using default model for given dataset')
-            model = get_model(args.data).to(device)
-    else:
-        model = get_model(args.use_inception, args.data, device).to(device)
-    model.eval()
-
-    # 4. Chose image to use as variable
-    X, y = get_image(args.image_number, args.data_batch_size, device)
-
-    y, original_out = check_output(X, y, model, device, args.is_softmax, args.softmax_dim)
-
-    # 6. Set the loss function
-    if args.target_neuron == -1:
-        maximise = 0
-        loss_fn = get_loss(args.loss, int(y), maximise, args.is_softmax, args.softmax_dim)
-    elif args.target_neuron > -1 and args.target_neuron < 10:
-        maximise = 1
-        loss_fn = get_loss(args.loss, args.target_neuron , maximise, args.is_softmax, args.softmax_dim)
-    else:
-        print('Please select a target neuron in [0, 9]')
-        print(sys.exit(1))
-
-    # 7. Set optimizer and run parameters
-    print('\n4. Starting the attack')
-    optim = get_optimizer(args.optimizer, model, loss_fn, device)
-    params = get_optimization_params(optim, X, args)
-
-    # 8. Perform the run
-    start_time = time.time()
-    new_x, loss_list, out_list = optim.run(**params)
-    end_time = time.time() - start_time
-
-
-    # 9. Display results
-    new_out = model(new_x.view(1, *list(new_x.shape)))
-    if not args.is_softmax:
-        softmax = nn.Softmax(dim=args.softmax_dim)
-        new_out = softmax(new_out)
-    new_y = torch.argmax(new_out)
-
-    fig, ax = plt.subplots(1, 3, figsize=(22, 6))
-    # 9.a) Loss
-    ax[0].plot(loss_list)
-    ax[0].set_title('Loss curve with {}'.format(args.optimizer))
-    ax[0].set_ylabel('Loss {}'.format(args.loss))
-    ax[0].set_xlabel('Step')
-    ax[0].grid()
-
-    # 9.b) Original image
-    if X.shape[0] > 1:
-        ax[1].imshow(np.transpose(X.cpu().numpy(), (1, 2, 0)))
-    else:
-        ax[1].imshow(X.cpu().numpy().reshape(X.shape[1], X.shape[2]))
-    ax[1].set_title('Before attack\nP(X={}) = {:.3f}\nP(X={}) = {:.3f}'.format(y, original_out[0, y], new_y, original_out[0, new_y]))
-
-    # 9.b) New Image
-    print('\n5. Attack is ended. Displaying results...')
-    print('\tInterval pixel values of modified X is: [{:.4f}, {:.3f}]'.format(new_x.min(), new_x.max()))
-    if args.L_type == 2:
-        l2_dist = torch.norm(X-new_x)
-        print('\tThe L2 distance is: {:.3f}'.format(float(l2_dist)))
-    elif args.L_type == -1:
-        linf_dist = torch.max(torch.abs(X-new_x))
-        print('\tThe computed upper bound of the infinity norm is: {:.3f}'.format(linf_dist))
-    else:
-        lp_dist = torch.norm(X-new_x, args.L_type)
-        print('\tThe L{} distance is: {:.3f}'.format(args.L_type, float(lp_dist)))
-    print('\t')
-    if args.target_neuron == -1:
-        if y != new_y.cpu():
-            success = 1
-            print('\tAttack has been carried out succesfully after {:.3f} seconds ({} steps)'.format(end_time, len(loss_list)))
-            print('\t\tThe initial class was:   {}'.format(y))
-            print('\t\tThe new class is:        {}'.format(new_y))
-        else:
-            success = 0
-            print('\tAfter {:.3f} seconds and {} steps the optimizer could not perform the attack'.format(end_time, len(loss_list)))
-            print('\tAttack failed!')
-    else:
-        if args.target_neuron == new_y.cpu():
-            success = 1
-            print('\tAttack has been carried out succesfully after {:.3f} seconds ({} steps)'.format(end_time, len(loss_list)))
-            print('\t\tThe initial class was:   {}'.format(y))
-            print('\t\tThe new class is:        {}'.format(new_y))
-        else:
-            success = 0
-            print('After {:.3f} seconds and {} steps the optimizer could not perform the attack'.format(end_time, len(loss_list)))
-            print('The neuron target has activation {:.4f} while the maximum activation neuron is {} with {:.4f}'.format(new_out[0, args.target_neuron],
-                                                                                                                          new_y,
-                                                                                                                          new_out[0, new_y]))
-            print('Attack failed!')
-
-    if new_x.shape[0] > 1:
-        ax[2].imshow(np.transpose(new_x.cpu().numpy(), (1, 2, 0)))
-    else:
-        ax[2].imshow(new_x.cpu().numpy().reshape(new_x.shape[1], new_x.shape[2]))
-    ax[2].set_title('After attack\nP(X={}) = {:.3f}\nP(X={}) = {:.3f}'.format(y, new_out[0, y], new_y, new_out[0, new_y]))
-    plt.show()
+    success, loss, epsilon, time_taken = main_body(args, device)
+    print('6. Results:')
+    print('\tSuccess rate:    {:.2f}%'.format(100*float(np.mean(success))))
+    print('\tAverage time:    {:.4f}'.format(float(np.mean(time_taken))))
+    print('\tAverage epsilon: {:.2f}'.format(float(np.mean(epsilon))))
 
     # 10. Save logs
     logs = {'Dataset': args.data,
             'Inception': args.use_inception,
-            'Image number': args.image_number,
             'Optimizer': args.optimizer,
             'Loss': args.loss,
-            'Specific class attacked': args.target_neuron,
-            'Results': {'Success': success, 'Time taken': end_time, 'Steps': len(loss_list)},
+            'L norm': args.L_type,
+            'Target attack': args.maximise,
+            'Results': {'Success': float(np.mean(success)),
+                        'Mean time': float(np.mean(time_taken)),
+                        'Mean epsilon': float(np.mean(epsilon))},
             'All_config_args': vars(args)}
 
     now = datetime.now()
     log_time = now.strftime("%d_%m_%Y_%Hh_%Mm_%Ss")
-    LOG_PATH = '{}/test_py_logs_{}'.format(args.logs_path, log_time)
-    print('\n6. Saving log file and figure at {}'.format(LOG_PATH))
-    fig.savefig('{}.jpg'.format(LOG_PATH))
-    with open('{}.txt'.format(LOG_PATH), 'w') as file:
+    LOG_PATH = '{}/logs_{}_{}_{}_{}_{}'.format(args.logs_path, args.optimizer, args.data, args.epsilon, args.L_type, log_time)
+    print('7. Saving log file and figure at {}.json'.format(LOG_PATH))
+    with open('{}.json'.format(LOG_PATH), 'w') as file:
         json.dump(logs, file)
