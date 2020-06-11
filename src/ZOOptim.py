@@ -24,24 +24,25 @@ class ZOOptim(object):
     """
     def run(self, x, c, learning_rate=1e-2, n_gradient=128,
             h=1e-4, beta_1=0.9, beta_2=0.999, solver="adam", verbose=False,
-            max_steps=10000, stop_criterion=True, epsilon=1e-8,
-            tqdm_disable=False, additional_out=False):
+            max_steps=10000, batch_size=-1, C=(0, 1),  stop_criterion=True,
+            tqdm_disabled=False, additional_out=False):
         """
         Args:
             Name                    Type                Description
             x:                      (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
-            c:                      (float)             Loss weight
+            c:                      (float)             Regularization parameter
             learning_rate:          (float)             Learning rate
             n_gradient:             (int)               Coordinates we simultaneously optimize
             h:                      (float)             Gradient estimation accuracy O(h^2)
             beta_1:                 (float)             ADAM hyper-parameter
             beta_2:                 (float)             ADAM hyper-parameter
             solver:                 (str)               Either "ADAM" or "Newton"
-            epsilon:                (float)             Avoid dividing by 0
-            max_steps:              (int)               The maximum number of steps
-            stop_criterion:         (boolean)           If true stop when the loss is 0
             verbose:                (int)               Display information. Default is 0
-            tqdm_disable:           (bool)              Disable the tqdm bar. Default is False
+            max_steps:              (int)               The maximum number of steps
+            batch_size:             (int)               Maximum number of parallelization during model call
+            C:                      (tuple)             The boundaries of a pixel
+            stop_criterion:         (boolean)           If true stop when the loss does not decrease for 20 iterations
+            tqdm_disabled:          (bool)              Disable the tqdm bar. Default is False
             additional_out:         (bool)              Return also all the x. Default is False
         return:
             x:                      (torch.tensor)      Final image
@@ -56,9 +57,10 @@ class ZOOptim(object):
             raise NotImplementedError("Unknown solver, use 'adam' or 'newton'")
 
         # 1. Initialize paramters
+        x = x.to(self.device)
         total_dim = int(np.prod(x.shape))
         x_dim = x.shape
-        # Scale and Reshape x to be column vector
+        # Reshape x to be column vector
         x = x.reshape(-1, 1)
         # Store original image
         x_0 = x.clone().detach()
@@ -78,11 +80,11 @@ class ZOOptim(object):
             self.T = torch.zeros(x.shape).to(self.device)
 
         # 2. Main Iteration
-        for iteration in tqdm(range(max_steps), disable=tqdm_disable):
+        for iteration in tqdm(range(max_steps), disable=tqdm_disabled):
 
             # 2.1 Call the step
             x = self.step(x, x_0, c, learning_rate, n_gradient, h, beta_1, beta_2,
-                          solver, epsilon, x_dim, total_dim, verbose)
+                          solver, x_dim, total_dim, batch_size, C, verbose)
 
             # 2.2 Compute new loss and store current info
             out = self.model(x.view(1, x_dim[0], x_dim[1], x_dim[2]))
@@ -98,20 +100,21 @@ class ZOOptim(object):
             if found:
                 # First valid example
                 if not losses_st or losses_st[-1] != 0:
-                    print("First valid image found at iteration {} with l2-distance = {}".format(iteration, curr_l2))
+                    if not tqdm_disabled:
+                        print("First valid image found at iteration {} with l2-distance = {}".format(iteration, curr_l2))
                     best_l2 = curr_l2
-                    best_image = x
+                    best_image = x.clone()
                     best_loss = curr_loss
                 # New best example
                 if curr_l2 < best_l2 and curr_loss_st == 0:
                     best_l2 = curr_l2
-                    best_image = x
+                    best_image = x.clone()
                     best_loss = curr_loss
                 # Worst example
                 else:
                     curr_l2 = best_l2
                     curr_loss = best_loss
-                    x = best_image
+                    x = best_image.clone()
                     curr_loss_st = torch.zeros(1)
 
             # 2.5 Save results
@@ -138,6 +141,7 @@ class ZOOptim(object):
         # 3. Unsuccessful attack
         if losses_st[-1] > 0:
             print("Unsuccessful attack")
+            return x.reshape(x_dim[0], x_dim[1], x_dim[2]), losses, outs
 
         # Return
         best_image = best_image.reshape(x_dim[0], x_dim[1], x_dim[2])
@@ -150,28 +154,29 @@ class ZOOptim(object):
     Do an optimization step
     """
     def step(self, x, x_0, c, learning_rate, n_gradient, h, beta_1, beta_2,
-             solver, epsilon, x_dim, total_dim, verbose):
+             solver, x_dim, total_dim, batch_size, C, verbose):
         """
         Args:
             Name                    Type                Description
             x:                      (torch.tensor)      Linearized current adversarial image
             x_0:                    (torch.tensor)      Linearized original image
-            c:                      (float)             Loss weight
+            c:                      (float)             Regularization parameter
             learning_rate:          (float)             Learning rate
             n_gradient:             (int)               Coordinates we simultaneously optimize
             h:                      (float)             Gradient estimation accuracy O(h^2)
             beta_1:                 (float)             ADAM hyper-parameter
             beta_2:                 (float)             ADAM hyper-parameter
             solver:                 (str)               Either "ADAM" or "Newton"
-            epsilon:                (float)             Avoid dividing by 0
             x_dim:                  (torch.size)        Size of the original image
             total_dim:              (int)               Total number of pixels
+            batch_size:             (int)               Maximum number of parallelization during model call
+            C:                      (tuple)             The boundaries of a pixel
             verbose:                (int)               Display information. Default is 0
         return:
             x:                      (torch.tensor)      Adversarial example
         """
 
-        # 1. Randomly pick batch_size coordinates
+        # 1. Select n_gradient dimensions
         if n_gradient > total_dim:
             raise ValueError("Batch size must be lower than the total dimension")
         indices = np.random.choice(total_dim, n_gradient, replace=False)
@@ -179,16 +184,12 @@ class ZOOptim(object):
         for n, i in enumerate(indices):
             e_matrix[n, i] = 1
 
-        # 2. expand x and x_0 to have n_gradient rows
-        x_expanded = x.view(-1).expand(n_gradient, total_dim).to(self.device)
-        x_0_expanded = x_0.view(-1).expand(n_gradient, total_dim).to(self.device)
-
-        # 3. Optimizers
+        # 2. Optimizers
         if solver == "adam":
-            # 3.1 Gradient approximation
-            g_hat = self.compute_gradient(x_0_expanded, x_expanded, e_matrix, c, n_gradient, h, solver, x_dim, verbose).view(-1, 1)
+            # 2.1 Gradient approximation
+            g_hat = self.compute_gradient(x_0, x, e_matrix, c, n_gradient, h, solver, x_dim, total_dim, batch_size, verbose).view(-1, 1)
 
-            # 3.2 ADAM Update
+            # 2.2 ADAM Update
             self.T[indices] = self.T[indices] + 1
             self.M[indices] = beta_1 * self.M[indices] + (1 - beta_1) * g_hat
             self.v[indices] = beta_2 * self.v[indices] + (1 - beta_2) * g_hat ** 2
@@ -196,10 +197,10 @@ class ZOOptim(object):
             v_hat = torch.zeros_like(self.v).to(self.device)
             M_hat[indices] = self.M[indices] / (1 - beta_1 ** self.T[indices])
             v_hat[indices] = self.v[indices] / (1 - beta_2 ** self.T[indices])
-            delta = -learning_rate * (M_hat / (torch.sqrt(v_hat) + epsilon))
+            delta = -learning_rate * (M_hat / (torch.sqrt(v_hat) + 1e-8))
             x = x + delta.view(-1, 1)
 
-            # 3.3 Call verbose
+            # 2.3 Call verbose
             if verbose > 1:
                 print('-------------ADAM------------')
                 print('The input x has shape:\t\t{}'.format(x.shape))
@@ -209,100 +210,120 @@ class ZOOptim(object):
                 print('v = {}'.format(self.v))
                 print('delta = {}'.format(delta))
 
-            # 3.4 Return
-            return self.project_boundaries(x).detach()
+            # 2.4 Return
+            return self.project_boundaries(x, C).detach()
 
         elif solver == "newton":
-            # 3.1 Gradient and Hessian approximation
-            g_hat, h_hat = self.compute_gradient(x_0_expanded, x_expanded, e_matrix, c, n_gradient, h, solver, x_dim, verbose)
+            # 2.1 Gradient and Hessian approximation
+            g_hat, h_hat, indices = self.compute_gradient(x_0, x, e_matrix, c, n_gradient, h, solver, x_dim, total_dim, batch_size, verbose)
             g_hat = g_hat.view(-1, 1)
             h_hat = h_hat.view(-1, 1)
 
-            # 3.2 Update
+            # 2.2 Update
             delta = torch.zeros(x.shape).to(self.device)
             h_hat[h_hat <= 0] = 1
             delta[indices] = -learning_rate * (g_hat / h_hat)
             x + delta.view(-1, 1)
 
-            # 3.3 Call verbose
+            # 2.3 Call verbose
             if verbose > 1:
                 print('------------NEWTON-----------')
-                print('The input x has shape:\t\t{}'.format(x.shape))
                 print('Chosen indices are: {}\n'.format(indices))
+                print('The input x has shape:\t\t{}'.format(x.shape))
                 print('delta = {}'.format(delta))
 
-            # 3.4 Return
-            return self.project_boundaries(x).detach()
+            # 2.4 Return
+            return self.project_boundaries(x, C).detach()
 
 
     """
     Compute Gradient and Hessian
     """
-    def compute_gradient(self, x_0_expanded, x_expanded, e_matrix, c, n_gradient, h, solver, x_dim, verbose):
+    def compute_gradient(self, x_0, x, e_matrix, c, n_gradient, h, solver, x_dim, total_dim, batch_size, verbose):
         """
         Args:
-            x_0_expanded:           (torch.tensor)      (n_pixels, n_batches) containing n_batches times the original image
-            x_expanded:             (torch.tensor)      (n_pixels, n_batches) containing n_batches times the original image
-            e_matrix:               (torch.tensor)      (n_pixels, n_batches)
-            c:                      (float)             Loss weight
+            x_0:                    (torch.tensor)      Linearized original image
+            x:                      (torch.tensor)      Linearized current adversarial image
+            e_matrix:
+            c:                      (float)             Regularization parameter
             n_gradient:             (int)               Coordinates we simultaneously optimize
             h:                      (float)             Gradient estimation accuracy O(h^2)
             solver:                 (str)               Either "ADAM" or "Newton"
             x_dim:                  (torch.size)        Size of the original image
+            total_dim:              (int)               Total number of pixels
+            batch_size:             (int)               Maximum number of parallelization during model call
             verbose:                (int)               Display information. Default is 0
         return:
             g_hat:                  (torch.tensor)      Gradient approximation
             h_hat:                  (torch.tensor)      Hessian approximation (if solver=="Newton")
         """
-        # 1. Intermediate steps
-        input_plus = x_expanded + h * e_matrix
-        input_minus = x_expanded - h * e_matrix
-        out_plus = self.model(input_plus.view(n_gradient, *list(x_dim)))
-        out_minus = self.model(input_minus.view(n_gradient, *list(x_dim)))
-        loss2_plus = self.loss(out_plus)
-        loss2_minus = self.loss(out_minus)
-        loss1_plus = torch.norm(input_plus - x_0_expanded, dim=1)
-        loss1_minus = torch.norm(input_minus - x_0_expanded, dim=1)
-        first_term = loss1_plus + (c * loss2_plus)
-        second_term = loss1_minus + (c * loss2_minus)
 
-        # 2. Compute gradient
-        g_hat = (first_term - second_term) / (2 * h)
+        # 1. Initialize useful parameters
+        if batch_size == -1:
+            batch_size = n_gradient
+
+        n_batches = n_gradient//batch_size
+        g_hat = torch.zeros(n_gradient, 1).to(self.device)
+
+        # 2. Cycle through each batch to compute gradient and hessian approximation
+        for i in range(n_batches):
+            # 2.1 Expand image along one direction
+            x_expanded = x.view(-1).expand(batch_size, total_dim).to(self.device)
+            x_0_expanded = x_0.view(-1).expand(batch_size, total_dim).to(self.device)
+
+            # 2.2 Intermediate steps
+            input_plus = x_expanded + h * e_matrix[batch_size*i:batch_size*(i+1), :]
+            input_minus = x_expanded - h * e_matrix[batch_size*i:batch_size*(i+1), :]
+            out_plus = self.model(input_plus.view(batch_size, *list(x_dim)))
+            out_minus = self.model(input_minus.view(batch_size, *list(x_dim)))
+            loss2_plus = self.loss(out_plus)
+            loss2_minus = self.loss(out_minus)
+            loss1_plus = torch.norm(input_plus - x_0_expanded, dim=1)
+            loss1_minus = torch.norm(input_minus - x_0_expanded, dim=1)
+            first_term = loss1_plus + (c * loss2_plus)
+            second_term = loss1_minus + (c * loss2_minus)
+
+            # 2.3. Compute gradient
+            g_hat[batch_size * i:batch_size * (i + 1), :] = (first_term.view(-1, 1) - second_term.view(-1, 1)) / (2 * h)
+
+            # 2.4 Compute Hessian if we are using Newton's method
+            if solver == 'newton':
+                loss1_added = torch.norm(x_expanded - x_0_expanded, dim=1)
+                loss2_added = self.loss(self.model(x_expanded.view(batch_size, *list(x_dim))))
+                additional_term = loss1_added + (c * loss2_added)
+                h_hat = (first_term + second_term - 2 * additional_term) / (h ** 2)
 
         # 3. Display info
         if verbose > 0:
             print('-----COMPUTING GRADIENT-----')
             print('g_hat has shape {}'.format(g_hat.shape))
             print('g_hat ='.format(g_hat))
-
-        # 4. Compute hessian
-        if solver == "newton":
-            loss1_added = torch.norm(x_expanded - x_0_expanded, dim=1)
-            loss2_added = self.loss(self.model(x_expanded.view(n_gradient, *list(x_dim))))
-            additional_term = loss1_added + (c * loss2_added)
-            h_hat = (first_term + second_term - 2 * additional_term) / (h ** 2)
-
-            # 4.1 Display info:
-            if verbose > 0:
+            if solver == 'newton':
                 print('h_hat has shape {}'.format(h_hat.shape))
                 print('h_hat ='.format(h_hat))
-            return g_hat.detach(), h_hat.detach()
 
-        return g_hat.detach()
+        # 4. Return
+        if solver == 'newton':
+            return g_hat.detach(), h_hat.detach()
+        else:
+            return g_hat.detach()
 
 
     """
     Check the boundaries of our constraint optimization problem
     """
-    def project_boundaries(self, x):
+    def project_boundaries(self, x, C):
         """
         Args:
             Name              Type                Description
             x:                (torch.tensor)      Linearized current adversarial image
+            C:                (tuple)             The boundaries of a pixel
+        return:
+            x:                (torch.tensor)      Linearized current adversarial image
         """
 
-        x[x > 1] = 1
-        x[x < 0] = 0
+        x[x > C[1]] = C[1]
+        x[x < C[0]] = C[0]
         return x
 
 

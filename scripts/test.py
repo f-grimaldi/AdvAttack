@@ -34,6 +34,7 @@ def load_data(dataset, is_inception, root, transform, batch_size, num_workers):
         sys.exit(1)
     return DataLoader, train, test
 
+
 def get_image(n, batch_size, device):
     if n >= 10000:
         print('The validation example are 10000. Please select an image index under 10000...')
@@ -70,6 +71,7 @@ def get_model(is_inception, data, device):
 
     return model
 
+
 def check_output(X, y, model, device, is_softmax, dim):
     out = model(X.view(1, *list(X.shape)))
     y_pred = torch.argmax(out.cpu())
@@ -82,6 +84,7 @@ def check_output(X, y, model, device, is_softmax, dim):
         return y_pred, nn.Softmax(dim=dim)(out)
     return y_pred, out
 
+
 def get_loss(loss, target_neuron, maximise, is_softmax, softmax_dim):
     if loss == 'MSE':
         return customLoss.MSELoss(target_neuron, maximise, is_softmax, softmax_dim)
@@ -93,21 +96,26 @@ def get_loss(loss, target_neuron, maximise, is_softmax, softmax_dim):
         raise NotImplementedError
         sys.exit(1)
 
+
 def get_optimizer(optim, model, loss, device):
     if optim == 'inexact':
         return zeroOptim.InexactZSCG(model, loss, device)
-    if optim == 'classic':
+    elif optim == 'classic':
         return zeroOptim.ClassicZSCG(model, loss, device)
-    if optim == 'zero_sgd':
+    elif optim == 'zero_sgd':
         return zeroOptim.ZeroSGD(model, loss, device)
+    elif optim == 'zoo':
+        return ZOOptim.ZOOptim(model, loss, device)
     else:
         print('Select one of the following optimizer:')
         print('Command                 Class           Descr')
         print('--optimizer "inexact"   InexactZSCG     Zero-order Stochastic Conditional Gradient with Inexact Updates')
         print('--optimizer "classic"   ClassicZSCG     Zero-order Stochastic Conditional Gradient')
         print('--optimizer "zero_sgd"  ZeroSGD         Zero-order Stochastic Gradient Descent')
+        print('--optimizer "zoo"       ZOOptim         Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton')
         raise NotImplementedError
         sys.exit(1)
+
 
 def get_optimization_params(optim, x, args):
     EPOCH = args.epochs
@@ -116,38 +124,64 @@ def get_optimization_params(optim, x, args):
     else:
         bs = args.batch_size
     if type(optim) == zeroOptim.InexactZSCG:
-        params = {'x':x ,
-                 'v':args.v, 'n_gradient': [args.n_gradient]*EPOCH,
-                 'batch_size': bs,
-                 'mu_k':[args.mu]*EPOCH , 'gamma_k':[args.gamma]*EPOCH,
-                 'C':args.C , 'epsilon':args.epsilon,
-                 'L_type': args.L_type,
-                 'max_steps':EPOCH, 'max_t': args.max_t,
-                 'tqdm_disabled':args.tqdm_disabled, 'verbose': args.verbose}
+        params = {'x': x,
+                  'v': args.v,
+                  'n_gradient': [args.n_gradient]*EPOCH,
+                  'batch_size': bs,
+                  'mu_k': [args.mu]*EPOCH,
+                  'gamma_k': [args.gamma]*EPOCH,
+                  'C': args.C,
+                  'epsilon': args.epsilon,
+                  'L_type': args.L_type,
+                  'max_steps': EPOCH, 'max_t': args.max_t,
+                  'tqdm_disabled': args.tqdm_disabled,
+                  'verbose': args.verbose}
     elif type(optim) == zeroOptim.ClassicZSCG:
-        params = {'x':x ,
-                 'v':args.v, 'n_gradient': [args.n_gradient]*EPOCH,
-                 'L_type': args.L_type,
-                 'batch_size': bs,
-                 'ak': [args.alpha]*EPOCH,
-                 'C':args.C , 'epsilon':args.epsilon,
-                 'max_steps':EPOCH,
-                 'tqdm_disabled':args.tqdm_disabled, 'verbose': args.verbose}
+        params = {'x': x,
+                  'v': args.v,
+                  'n_gradient': [args.n_gradient]*EPOCH,
+                  'L_type': args.L_type,
+                  'batch_size': bs,
+                  'ak': [args.alpha]*EPOCH,
+                  'C': args.C,
+                  'epsilon': args.epsilon,
+                  'max_steps': EPOCH,
+                  'tqdm_disabled': args.tqdm_disabled,
+                  'verbose': args.verbose}
     elif type(optim) == zeroOptim.ZeroSGD:
-        params = {'x':x ,
-                 'v':args.v, 'n_gradient': [args.n_gradient]*EPOCH,
-                 'batch_size': bs,
-                 'L_type': args.L_type,
-                 'ak': [args.lr]*EPOCH,
-                 'C':args.C , 'epsilon':args.epsilon,
-                 'max_steps':EPOCH,
-                 'tqdm_disabled':args.tqdm_disabled, 'verbose': args.verbose}
+        params = {'x': x,
+                  'v': args.v,
+                  'n_gradient': [args.n_gradient]*EPOCH,
+                  'batch_size': bs,
+                  'L_type': args.L_type,
+                  'ak': [args.lr]*EPOCH,
+                  'C': args.C,
+                  'epsilon': args.epsilon,
+                  'max_steps': EPOCH,
+                  'tqdm_disabled': args.tqdm_disabled,
+                  'verbose': args.verbose}
+    elif type(optim) == ZOOptim.ZOOptim:
+        params = {'x': x,
+                  'c': args.c,
+                  'n_gradient': args.n_gradient,
+                  'batch_size': bs,
+                  'beta_1': args.beta_1,
+                  'beta_2': args.beta_2,
+                  'solver': args.solver,
+                  'stop_criterion': args.stop_criterion,
+                  'learning_rate': args.lr,
+                  'additional_out': args.additional_out,
+                  'max_steps': EPOCH,
+                  'C': args.C,
+                  'tqdm_disabled': args.tqdm_disabled,
+                  'verbose': args.verbose}
     else:
         print('Select one of the following optimizer:')
         print('Command                 Class           Descr')
         print('--optimizer "inexact"   InexactZSCG     Zero-order Stochastic Conditional Gradient with Inexact Updates')
         print('--optimizer "classic"   ClassicZSCG     Zero-order Stochastic Conditional Gradient')
         print('--optimizer "zero_sgd"  ZeroSGD         Zero-order Stochastic Gradient Descent')
+        print('--optimizer "zoo"       ZOOptim         Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton')
         raise NotImplementedError
         sys.exit(1)
 
@@ -185,6 +219,7 @@ if __name__ == '__main__':
 
     import loss as customLoss
     import zeroOptim as zeroOptim
+    import ZOOptim as ZOOptim
     import dataset as data
 
 
@@ -262,6 +297,9 @@ if __name__ == '__main__':
     parser.add_argument('--tqdm_disabled',
                         type=int,               default=0,
                         help='If 1 the tqdm bar during the optimization procedure will not be displayed. Default is 0')
+    parser.add_argument('--additional_out',
+                        action='store_true', default=False,
+                        help='Used in ZOO to return also l2-distance and hinge-loss function. Default is 0')
     # 1.d) General arguments in Balasubramanian Algortihms
     parser.add_argument('--v',
                         type=float,             default=0.001,
@@ -286,11 +324,27 @@ if __name__ == '__main__':
     parser.add_argument('--max_t',
                         type=int,               default=50,
                         help='The maximum number of steps inside ICG. Default is 50. Only for Inexact ZSCG')
-    # 1.g) Zero SGD args
+    # 1.g) Zero SGD/ZOOptim args
     parser.add_argument('--lr',
-                        type=float,             default=0.1,
-                        help='The learning rate for the Zero SGD. Default is 0.01. Only for Zero SGD')
-    # 1.h) Logs Parameters
+                        type=float,             default=1e-2,
+                        help='The learning rate for the Zero SGD/ZOOptim. Default is 1e-2')
+    # 1.h) ZOOptim args
+    parser.add_argument('--beta_1',
+                        type=float, default=0.9,
+                        help='ADAM parameter')
+    parser.add_argument('--beta_2',
+                        type=float, default=0.999,
+                        help='ADAM parameter')
+    parser.add_argument('--solver',
+                        type=str, default='adam',
+                        help='Either ADAM or Newton')
+    parser.add_argument('--c',
+                        type=float, default=1,
+                        help='Hinge-loss wight')
+    parser.add_argument('--stop_criterion',
+                        action='store_true', default=True,
+                        help='Stop if the loss does not decrease for 20 epochs')
+    # 1.i) Logs Parameters
     parser.add_argument('--logs_path',
                         type=str,             default='../logs',
                         help='The path where to save the run logs')
@@ -311,10 +365,9 @@ if __name__ == '__main__':
     # 4. Loading the network
     if args.model_path != 'none':
         try:
-
             net = torch.load(args.model_path).to(device)
         except:
-            print('Couldnt load the model from path {}. Either wrong path or model class not found in src/models.')
+            print('Could not load the model from path {}. Either wrong path or model class not found in src/models.')
             print('Using default model for given dataset')
             model = get_model(args.data).to(device)
     else:
@@ -344,7 +397,10 @@ if __name__ == '__main__':
 
     # 8. Perform the run
     start_time = time.time()
-    new_x, loss_list, out_list = optim.run(**params)
+    if args.additional_out:
+        new_x, loss_list, l2_dist, losses_st, out_list = optim.run(**params)
+    else:
+        new_x, loss_list, out_list = optim.run(**params)
     end_time = time.time() - start_time
 
 
@@ -386,7 +442,7 @@ if __name__ == '__main__':
     if args.target_neuron == -1:
         if y != new_y.cpu():
             success = 1
-            print('\tAttack has been carried out succesfully after {:.3f} seconds ({} steps)'.format(end_time, len(loss_list)))
+            print('\tAttack has been carried out successfully after {:.3f} seconds ({} steps)'.format(end_time, len(loss_list)))
             print('\t\tThe initial class was:   {}'.format(y))
             print('\t\tThe new class is:        {}'.format(new_y))
         else:
@@ -396,7 +452,7 @@ if __name__ == '__main__':
     else:
         if args.target_neuron == new_y.cpu():
             success = 1
-            print('\tAttack has been carried out succesfully after {:.3f} seconds ({} steps)'.format(end_time, len(loss_list)))
+            print('\tAttack has been carried out successfully after {:.3f} seconds ({} steps)'.format(end_time, len(loss_list)))
             print('\t\tThe initial class was:   {}'.format(y))
             print('\t\tThe new class is:        {}'.format(new_y))
         else:
