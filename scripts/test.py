@@ -106,6 +106,8 @@ def get_optimizer(optim, model, loss, device):
         return zeroOptim.ZeroSGD(model, loss, device)
     elif optim == 'zoo':
         return ZOOptim.ZOOptim(model, loss, device)
+    elif optim == 'fw':
+        return FWOptim.FWOptim(model, loss, device)
     else:
         print('Select one of the following optimizer:')
         print('Command                 Class           Descr')
@@ -113,6 +115,7 @@ def get_optimizer(optim, model, loss, device):
         print('--optimizer "classic"   ClassicZSCG     Zero-order Stochastic Conditional Gradient')
         print('--optimizer "zero_sgd"  ZeroSGD         Zero-order Stochastic Gradient Descent')
         print('--optimizer "zoo"       ZOOptim         Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton')
+        print('--optimizer "fw"        FWOptim         Zero-order Frank-Wolfe Gradient Descent')
         raise NotImplementedError
         sys.exit(1)
 
@@ -175,6 +178,21 @@ def get_optimization_params(optim, x, args):
                   'C': args.C,
                   'tqdm_disabled': args.tqdm_disabled,
                   'verbose': args.verbose}
+    elif type(optim) == FWOptim.FWOptim:
+        params = {'x': x,
+                  'n_gradient': args.n_gradient,
+                  'batch_size': bs,
+                  'beta': args.FW_beta,
+                  'delta': args.FW_delta,
+                  'gamma': args.FW_gamma,
+                  'epsilon': args.epsilon,
+                  'L_type': args.L_type,
+                  'additional_out': args.additional_out,
+                  'max_steps': EPOCH,
+                  'C': args.C,
+                  'tqdm_disabled': args.tqdm_disabled,
+                  'verbose': args.verbose}
+
     else:
         print('Select one of the following optimizer:')
         print('Command                 Class           Descr')
@@ -182,6 +200,7 @@ def get_optimization_params(optim, x, args):
         print('--optimizer "classic"   ClassicZSCG     Zero-order Stochastic Conditional Gradient')
         print('--optimizer "zero_sgd"  ZeroSGD         Zero-order Stochastic Gradient Descent')
         print('--optimizer "zoo"       ZOOptim         Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton')
+        print('--optimizer "fw"        FWOptim         Zero-order Frank-Wolfe Gradient Descent')
         raise NotImplementedError
         sys.exit(1)
 
@@ -218,9 +237,10 @@ if __name__ == '__main__':
     from sklearn.metrics import accuracy_score
 
     import loss as customLoss
-    import zeroOptim as zeroOptim
-    import ZOOptim as ZOOptim
     import dataset as data
+    import zeroOptim
+    import FWOptim
+    import ZOOptim
 
 
 
@@ -275,7 +295,7 @@ if __name__ == '__main__':
     # 1.e) Optim general args
     parser.add_argument('--optimizer',
                         type=str,               default='inexact',
-                        help='Supported optimizer: inexact, classic, zero_sgd. Default is inexact')
+                        help='Supported optimizer: inexact, classic, zero_sgd, zoo and fw. Default is inexact')
     parser.add_argument('--C',
                         type=tuple,             default=(0, 1),
                         help='Iterable with the minimum and the maximum value of a pixel. Default is (0, 1)')
@@ -344,7 +364,17 @@ if __name__ == '__main__':
     parser.add_argument('--stop_criterion',
                         action='store_true', default=True,
                         help='Stop if the loss does not decrease for 20 epochs')
-    # 1.i) Logs Parameters
+    # 1.i) FrankWolfe parameters
+    parser.add_argument('--FW_delta',
+                        type=float, default=0.001,
+                        help='Gaussian smoothing in Frank-Wolfe')
+    parser.add_argument('--FW_beta',
+                        type=float, default=0.8,
+                        help='Momentum at every step')
+    parser.add_argument('--FW_gamma',
+                        type=float, default=0.2,
+                        help='learning_rate')
+    # 1.j) Logs Parameters
     parser.add_argument('--logs_path',
                         type=str,             default='../logs',
                         help='The path where to save the run logs')
