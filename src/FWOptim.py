@@ -2,7 +2,7 @@ from tqdm import tqdm
 import numpy as np
 import torch
 
-class FWOptim():
+class FWOptim(object):
 
     # Constructor
     def __init__(self, model, loss, device=torch.device('cpu')):

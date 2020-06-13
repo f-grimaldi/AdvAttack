@@ -4,7 +4,7 @@ from torch import nn
 """
 Abstract object for the Custom Loss. Child of nn.Module
 """
-class Loss:
+class Loss(object):
 
     def __init__(self, neuron, maximise=0):
         """
@@ -16,12 +16,11 @@ class Loss:
         self.neuron = neuron
         self.maximise = maximise
 
-    def __call__(self, args):
-        return self.forward(args)
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
 
-    def forward(self, args):
+    def forward(self, *args, **kwargs):
         raise NotImplementedError
-
 
 
 """
@@ -55,11 +54,11 @@ class MSELoss(Loss):
         # Deal with 1D input
         if len(y_pred.shape) == 1:
             y_pred = y_pred.view(-1, 1)
-
-        # Deal with non-softmax model output
+        # Case model output does not have non-softmax model output
         if not self.is_softmax:
-            logits = nn.Softmax(dim=self.dim)(y_pred)
-            return 0.5*(int(self.maximise) - logits[:, self.neuron])**2
+            # Compute logits
+            y_pred = nn.Softmax(dim=self.dim)(y_pred)
+        # Return loss
         return 0.5*(int(self.maximise) - y_pred[:, self.neuron])**2
 
 
@@ -72,13 +71,12 @@ class ZooLoss(Loss):
 
     def __init__(self, neuron, maximise, transf=0, is_softmax=False, dim=1):
         """
-        Args:
-            Name         Type      Desc
-            neuron       int       If maximize is True is the desired output, the original class label otherwise
-            maximize     bool      If True the attack is targeted, untargeted otherwise
-            transf       float     Transferability parameter
-            is_softmax:  bool      Bool indicating if the model output is probability distribution. Default is False
-            dim:         int       Dimension of softmax application. Default is 1
+        Args         Type      Desc
+        neuron       int       If maximize is True is the desired output, the original class label otherwise
+        maximize     bool      If True the attack is targeted, untargeted otherwise
+        transf       float     Transferability parameter
+        is_softmax:  bool      Bool indicating if the model output is probability distribution. Default is False
+        dim:         int       Dimension of softmax application. Default is 1
         """
         super().__init__(neuron, maximise)
         self.transf = transf
@@ -88,8 +86,8 @@ class ZooLoss(Loss):
 
     def forward(self, conf):
         """
-        Args         Type             Desc
-            conf:        torch_tensor     Matrix of size (n_batch, n_classes) containing the confidence score (output of the model)
+        Args    Type            Desc
+        conf    torch_tensor    Matrix of size (n_batch, n_classes) containing the confidence score (output of the model)
         """
         # Deal with 1D input
         if len(conf.shape) == 1:
@@ -98,13 +96,13 @@ class ZooLoss(Loss):
         # Avoid loss to be 0 in case of equal probability
         if self.maximise:
             conf[:, self.neuron] -= 1e-10
-        elif not self.maximise:
+        else:
             conf[:, self.neuron] += 1e-10
 
         # Deal with non-softmax model output
         if not self.is_softmax:
             conf = nn.Softmax(dim=self.dim)(conf)
-        
+
         # Compute log and neg_log matrices
         conf_log = torch.log(conf)
         conf_log_neg = torch.cat((conf_log[:, :self.neuron], conf_log[:, self.neuron+1:]), axis=1)
@@ -112,14 +110,15 @@ class ZooLoss(Loss):
         # Compute Loss
         if self.maximise:
             # Targeted
-            CLN = torch.max(conf_log_neg, axis=1).values - conf_log[:, self.neuron]
-            return torch.max(CLN, torch.zeros_like(CLN)-self.transf)
+            cln = torch.max(conf_log_neg, axis=1).values - conf_log[:, self.neuron]
         else:
             # Untargeted
-            CLN = conf_log[:, self.neuron] - torch.max(conf_log_neg, axis=1).values
-            return torch.max(CLN, torch.zeros_like(CLN)-self.transf)
+            cln = conf_log[:, self.neuron] - torch.max(conf_log_neg, axis=1).values
+        # Return loss
+        return torch.max(cln, torch.zeros_like(cln)-self.transf)
 
 
+# Unit testing
 if __name__ == '__main__':
     mine = (1.999999, 2.2, 2.2, 2.2)
     mine = torch.tensor(mine).view(1, -1)

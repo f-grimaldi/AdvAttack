@@ -327,8 +327,10 @@ class ZOOptim(object):
         return x
 
 
-
+# Unit testing
 if __name__ == '__main__':
+
+    # Dependencies
     from loss import ZooLoss
     from torch import nn
     from tqdm import tqdm
@@ -340,7 +342,6 @@ if __name__ == '__main__':
             self.conv = nn.Conv2d(3, 3, (2, 2), stride=1, padding=1)
             self.linear = nn.Linear(3*29*29, 10)
 
-
         def forward(self, x):
             x = nn.ReLU()(self.conv(x))
             return nn.Sigmoid()(self.linear(x.view(x.shape[0], -1)))
@@ -349,7 +350,6 @@ if __name__ == '__main__':
     m = [50]*epoch
     a = [0.9]*epoch
     v = 1
-
 
     net = Net()
     loss = ZooLoss(0, 0)
