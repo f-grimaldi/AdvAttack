@@ -84,22 +84,25 @@ def get_loss(loss, target_neuron, maximise, is_softmax, softmax_dim):
 def get_optimizer(optim, model, loss, device):
     if optim == 'inexact':
         return zeroOptim.InexactZSCG(model, loss, device)
-    if optim == 'classic':
+    elif optim == 'accelerated':
+        return zeroOptim.InexactAcceleratedZSCG(model, loss, device)
+    elif optim == 'classic':
         return zeroOptim.ClassicZSCG(model, loss, device)
-    if optim == 'zero_sgd':
+    elif optim == 'zero_sgd':
         return zeroOptim.ZeroSGD(model, loss, device)
     elif optim == 'zoo':
         return ZOOptim.ZOOptim(model, loss, device)
     elif optim == 'fw':
-        return FWOptim.FWOptim(model, loss, device)
+        return FWOptim.FrankWolfe(model, loss, device)
     else:
         print('Select one of the following optimizer:')
-        print('Command                 Class           Descr')
-        print('--optimizer "inexact"   InexactZSCG     Zero-order Stochastic Conditional Gradient with Inexact Updates')
-        print('--optimizer "classic"   ClassicZSCG     Zero-order Stochastic Conditional Gradient')
-        print('--optimizer "zero_sgd"  ZeroSGD         Zero-order Stochastic Gradient Descent')
-        print('--optimizer "zoo"       ZOOptim         Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton')
-        print('--optimizer "fw"        FWOptim         Zero-order Frank-Wolfe Gradient Descent')
+        print('Command                     Class                    Descr')
+        print('--optimizer "inexact"       InexactZSCG              Zero-order Stochastic Conditional Gradient with Inexact Updates')
+        print('--optimizer "classic"       ClassicZSCG              Zero-order Stochastic Conditional Gradient')
+        print('--optimizer "accelerated"   InexactAcceleratedZSCG   Accelerated Zero-order Stochastic Conditional Gradient with Inexact Updates')
+        print('--optimizer "zero_sgd"      ZeroSGD                  Zero-order Stochastic Gradient Descent')
+        print('--optimizer "zoo"           ZOOptim                  Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton')
+        print('--optimizer "fw"            FWOptim                  Zero-order Frank-Wolfe Gradient Descent')
         raise NotImplementedError
         sys.exit(1)
 
@@ -115,6 +118,21 @@ def get_optimization_params(optim, x, args):
                   'v': args.v,
                   'n_gradient': [args.n_gradient]*EPOCH,
                   'batch_size': bs,
+                  'mu_k': [args.mu]*EPOCH,
+                  'gamma_k': [args.gamma]*EPOCH,
+                  'C': args.C,
+                  'epsilon': args.epsilon,
+                  'L_type': args.L_type,
+                  'max_steps': EPOCH,
+                  'max_t': args.max_t,
+                  'tqdm_disabled': args.tqdm_disabled,
+                  'verbose': args.verbose}
+    elif type(optim) == zeroOptim.InexactAcceleratedZSCG:
+        params = {'x': x,
+                  'v': args.v,
+                  'n_gradient': [args.n_gradient]*EPOCH,
+                  'batch_size': bs,
+                  'alpha_k': [args.alpha]*EPOCH,
                   'mu_k': [args.mu]*EPOCH,
                   'gamma_k': [args.gamma]*EPOCH,
                   'C': args.C,
@@ -163,28 +181,35 @@ def get_optimization_params(optim, x, args):
                   'tqdm_disabled': args.tqdm_disabled,
                   'verbose': args.verbose}
 
-    elif type(optim) == FWOptim.FWOptim:
+    elif type(optim) == FWOptim.FrankWolfe:
+        if args.L_type == -1:
+            l_type = 'inf'
+        if args.verbose == 0:
+            verbose = False
+            tqdm_disabled = True
+        else:
+            verbose = True
         params = {'x': x,
-                  'n_gradient': args.n_gradient,
-                  'batch_size': bs,
-                  'beta': args.FW_beta,
-                  'delta': args.FW_delta,
-                  'gamma': args.FW_gamma,
-                  'epsilon': args.epsilon,
-                  'L_type': args.L_type,
-                  'max_steps': EPOCH,
-                  'C': args.C,
-                  'tqdm_disabled': args.tqdm_disabled,
-                  'verbose': args.verbose}
+                  'grad_num_iter': args.n_gradient,
+                  'grad_batch_size': bs,
+                  'm_weight': args.FW_beta,
+                  'grad_smooth': args.FW_delta,
+                  'step_size': args.FW_gamma,
+                  'l_bound': args.epsilon,
+                  'l_type': l_type,
+                  'num_epochs': EPOCH,
+                  'clip': args.C,
+                  'verbose': verbose}
 
     else:
         print('Select one of the following optimizer:')
-        print('Command                 Class           Descr')
-        print('--optimizer "inexact"   InexactZSCG     Zero-order Stochastic Conditional Gradient with Inexact Updates')
-        print('--optimizer "classic"   ClassicZSCG     Zero-order Stochastic Conditional Gradient')
-        print('--optimizer "zero_sgd"  ZeroSGD         Zero-order Stochastic Gradient Descent')
-        print('--optimizer "zoo"       ZOOptim         Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton')
-        print('--optimizer "fw"        FWOptim         Zero-order Frank-Wolfe Gradient Descent')
+        print('Command                     Class                    Descr')
+        print('--optimizer "inexact"       InexactZSCG              Zero-order Stochastic Conditional Gradient with Inexact Updates')
+        print('--optimizer "classic"       ClassicZSCG              Zero-order Stochastic Conditional Gradient')
+        print('--optimizer "accelerated"   InexactAcceleratedZSCG   Accelerated Zero-order Stochastic Conditional Gradient with Inexact Updates')
+        print('--optimizer "zero_sgd"      ZeroSGD                  Zero-order Stochastic Gradient Descent')
+        print('--optimizer "zoo"           ZOOptim                  Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton')
+        print('--optimizer "fw"            FWOptim                  Zero-order Frank-Wolfe Gradient Descent')
         raise NotImplementedError
         sys.exit(1)
 
