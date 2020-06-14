@@ -284,7 +284,6 @@ def target_run(args, model, X_ori, y_ori, device):
                 l2_dist = torch.norm(X-new_x.cpu())
                 if float(l2_dist) > 0:
                     epsilon.append(l2_dist)
-                epsilon.append(l2_dist)
             elif args.L_type == -1:
                 linf_dist = torch.max(torch.abs(X-new_x.cpu()))
                 epsilon.append(linf_dist)
