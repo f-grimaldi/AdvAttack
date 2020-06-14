@@ -525,7 +525,7 @@ if __name__ == '__main__':
 
     now = datetime.now()
     log_time = now.strftime("%d_%m_%Y_%Hh_%Mm_%Ss")
-    if args.optim == 'zoo':
+    if args.optimizer == 'zoo':
         LOG_PATH = '{}/logs_{}_{}_{}_{}_{}'.format(args.logs_path, args.optimizer, args.data, args.c, args.L_type, log_time)
     else:
         LOG_PATH = '{}/logs_{}_{}_{}_{}_{}'.format(args.logs_path, args.optimizer, args.data, args.epsilon, args.L_type, log_time)
