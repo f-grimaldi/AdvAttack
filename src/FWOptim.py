@@ -200,7 +200,7 @@ class FrankWolfe(object):
         # Return either new x and new momentum
         return x.detach(), m.detach()
 
-    def gradient(self, x, num_iter, batch_size, smooth, how, dim=1.0, verbose=False):
+    def gradient(self, x, num_iter, batch_size, smooth, how, verbose=False):
         """
         Compute gradient, by looping b times through estimation iterations
 
@@ -216,7 +216,7 @@ class FrankWolfe(object):
         q = q.to(self.device)  # Move to correct device
 
         # Get dimentions of input tensor
-        d = int(np.prod(dim))
+        d = int(np.prod(x.shape))
 
         # Get number of batches in gradient estimation
         num_batches = num_iter // batch_size
@@ -234,8 +234,9 @@ class FrankWolfe(object):
                 u_k = u_k.normal_(mean=0, std=1)
                 coeff = (1/(2*smooth*num_iter))
             # Euclidean sphere sampling
-            elif how == 'shpere':
-                raise NotImplementedError
+            elif how == 'sphere':
+                u_k = u_k.normal_(mean=0, std=1)
+                u_k = u_k/torch.norm(u_k, dim=0)
                 coeff = (d/(2*smooth*num_iter))
             else:  # Not defined
                 raise NotImplementedError('Sampling method not defined')
@@ -245,6 +246,7 @@ class FrankWolfe(object):
 
             # Expand input vector along batch size axis
             x_expanded = x.expand(batch_size, *list(x.shape))  # bs x channel x width x height
+
             # Compute "backward" movement
             x_bw = x_expanded - smooth * u_k
             # Compute "forward" movement
