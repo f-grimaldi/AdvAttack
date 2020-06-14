@@ -524,7 +524,10 @@ if __name__ == '__main__':
 
     now = datetime.now()
     log_time = now.strftime("%d_%m_%Y_%Hh_%Mm_%Ss")
-    LOG_PATH = '{}/logs_{}_{}_{}_{}_{}'.format(args.logs_path, args.optimizer, args.data, args.epsilon, args.L_type, log_time)
+    if args.optimizer == 'zoo':
+        LOG_PATH = '{}/logs_{}_{}_{}_{}_{}'.format(args.logs_path, args.optimizer, args.data, args.c, args.L_type, log_time)
+    else:
+        LOG_PATH = '{}/logs_{}_{}_{}_{}_{}'.format(args.logs_path, args.optimizer, args.data, args.epsilon, args.L_type, log_time)
     print('7. Saving log file and figure at {}.json'.format(LOG_PATH))
     with open('{}.json'.format(LOG_PATH), 'w') as file:
         json.dump(logs, file)
