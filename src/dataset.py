@@ -117,7 +117,7 @@ class MNIST(torch.utils.data.Dataset):
         # Make plot
         fig, ax = plt.subplots(1, 5, figsize=(20, 6))
         for n in range(5):
-            img = np.transpose(X[n].numpy(), (1, 2, 0))
+            img = np.transpose(X[n].detach().numpy(), (1, 2, 0))
             if img.shape[2] == 1:
                 img = img.reshape(img.shape[0], img.shape[1])
             ax[n].imshow(img, cmap='gray')
