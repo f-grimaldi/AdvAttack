@@ -215,7 +215,7 @@ class ZOOptim(object):
 
         elif solver == "newton":
             # 2.1 Gradient and Hessian approximation
-            g_hat, h_hat, indices = self.compute_gradient(x_0, x, e_matrix, c, n_gradient, h, solver, x_dim, total_dim, batch_size, verbose)
+            g_hat, h_hat = self.compute_gradient(x_0, x, e_matrix, c, n_gradient, h, solver, x_dim, total_dim, batch_size, verbose)
             g_hat = g_hat.view(-1, 1)
             h_hat = h_hat.view(-1, 1)
 
@@ -223,7 +223,7 @@ class ZOOptim(object):
             delta = torch.zeros(x.shape).to(self.device)
             h_hat[h_hat <= 0] = 1
             delta[indices] = -learning_rate * (g_hat / h_hat)
-            x + delta.view(-1, 1)
+            x = x + delta.view(-1, 1)
 
             # 2.3 Call verbose
             if verbose > 1:
