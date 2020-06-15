@@ -186,20 +186,21 @@ def get_optimization_params(optim, x, args):
             l_type = 'inf'
         if args.verbose == 0:
             verbose = False
-            tqdm_disabled = True
         else:
             verbose = True
-        params = {'x': x,
-                  'grad_num_iter': args.n_gradient,
-                  'grad_batch_size': bs,
-                  'm_weight': args.FW_beta,
-                  'grad_smooth': args.FW_delta,
-                  'step_size': args.FW_gamma,
-                  'l_bound': args.epsilon,
-                  'l_type': l_type,
-                  'num_epochs': EPOCH,
-                  'clip': args.C,
-                  'verbose': verbose}
+        params = {
+            'x': x,
+            'grad_num_iter': args.n_gradient,
+            'grad_batch_size': bs, #args.batch_size
+            'm_weight': args.FW_beta,
+            'grad_smooth': args.FW_delta,
+            'step_size': args.FW_gamma,
+            'l_bound': args.epsilon,
+            'l_type': l_type, #args.L_type
+            'num_epochs': EPOCH, #args.epochs
+            'clip': args.C,
+            'verbose': verbose
+        }
 
     else:
         print('Select one of the following optimizer:')
@@ -244,30 +245,31 @@ def untarget_run(args, model, X_ori, y_ori, device):
 
         # b. DO run
         start_time = time.time()
-        new_x, losses, out_list = optim.run(**params)
-        end_time = time.time() - start_time
+        with torch.no_grad():
+            new_x, losses, out_list = optim.run(**params)
+            end_time = time.time() - start_time
 
-        loss_list.append(losses[-1])
-        time_t.append(end_time)
+            loss_list.append(losses[-1])
+            time_t.append(end_time)
 
-        new_out = model(new_x.view(1, *list(new_x.shape)))
-        if not args.is_softmax:
-            softmax = nn.Softmax(dim=args.softmax_dim)
-            new_out = softmax(new_out)
-        new_y = torch.argmax(new_out)
+            new_out = model(new_x.view(1, *list(new_x.shape)))
+            if not args.is_softmax:
+                softmax = nn.Softmax(dim=args.softmax_dim)
+                new_out = softmax(new_out)
+            new_y = torch.argmax(new_out)
 
-        if int(new_y) != int(y):
-            success.append(1)
-        else:
-            success.append(0)
+            if int(new_y) != int(y):
+                success.append(1)
+            else:
+                success.append(0)
 
-        if args.L_type == 2:
-            l2_dist = torch.norm(X-new_x.cpu())
-            if float(l2_dist) > 0:
-                epsilon.append(l2_dist)
-        elif args.L_type == -1:
-            linf_dist = torch.max(torch.abs(X-new_x.cpu()))
-            epsilon.append(linf_dist)
+            if args.L_type == 2:
+                l2_dist = torch.norm(X-new_x.cpu())
+                if float(l2_dist) > 0:
+                    epsilon.append(l2_dist)
+            elif args.L_type == -1:
+                linf_dist = torch.max(torch.abs(X-new_x.cpu()))
+                epsilon.append(linf_dist)
 
     return success, loss_list, epsilon, time_t
 
@@ -288,30 +290,31 @@ def target_run(args, model, X_ori, y_ori, device):
 
             # b. DO run
             start_time = time.time()
-            new_x, losses, out_list = optim.run(**params)
-            end_time = time.time() - start_time
+            with torch.no_grad():
+                new_x, losses, out_list = optim.run(**params)
+                end_time = time.time() - start_time
 
-            loss_list.append(losses[-1])
-            time_t.append(end_time)
+                loss_list.append(losses[-1])
+                time_t.append(end_time)
 
-            new_out = model(new_x.view(1, *list(new_x.shape)))
-            if not args.is_softmax:
-                softmax = nn.Softmax(dim=args.softmax_dim)
-                new_out = softmax(new_out)
-            new_y = torch.argmax(new_out)
+                new_out = model(new_x.view(1, *list(new_x.shape)))
+                if not args.is_softmax:
+                    softmax = nn.Softmax(dim=args.softmax_dim)
+                    new_out = softmax(new_out)
+                new_y = torch.argmax(new_out)
 
-            if int(new_y) == i:
-                success.append(1)
-            else:
-                success.append(0)
+                if int(new_y) == i:
+                    success.append(1)
+                else:
+                    success.append(0)
 
-            if args.L_type == 2:
-                l2_dist = torch.norm(X-new_x.cpu())
-                if float(l2_dist) > 0:
-                    epsilon.append(l2_dist)
-            elif args.L_type == -1:
-                linf_dist = torch.max(torch.abs(X-new_x.cpu()))
-                epsilon.append(linf_dist)
+                if args.L_type == 2:
+                    l2_dist = torch.norm(X-new_x.cpu())
+                    if float(l2_dist) > 0:
+                        epsilon.append(l2_dist)
+                elif args.L_type == -1:
+                    linf_dist = torch.max(torch.abs(X-new_x.cpu()))
+                    epsilon.append(linf_dist)
 
     return success, loss_list, epsilon, time_t
 
