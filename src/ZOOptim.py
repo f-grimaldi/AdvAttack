@@ -84,7 +84,7 @@ class ZOOptim(object):
 
             # 2.1 Call the step
             x = self.step(x, x_0, c, learning_rate, n_gradient, h, beta_1, beta_2,
-                          solver, x_dim, total_dim, batch_size, C, verbose)
+                          solver, x_dim, total_dim, batch_size, C, verbose).detach()
 
             # 2.2 Compute new loss and store current info
             out = self.model(x.view(1, x_dim[0], x_dim[1], x_dim[2]))
