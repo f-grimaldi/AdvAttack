@@ -222,6 +222,7 @@ class ZOOptim(object):
             # 2.2 Update
             delta = torch.zeros(x.shape).to(self.device)
             h_hat[h_hat <= 0] = 1
+            h_hat[h_hat <= 1e-3] = 1e-3
             delta[indices] = -learning_rate * (g_hat / h_hat)
             x = x + delta.view(-1, 1)
 
@@ -264,6 +265,7 @@ class ZOOptim(object):
 
         n_batches = n_gradient//batch_size
         g_hat = torch.zeros(n_gradient, 1).to(self.device)
+        h_hat = torch.zeros(n_gradient, 1).to(self.device)
 
         # 2. Cycle through each batch to compute gradient and hessian approximation
         for i in range(n_batches):
@@ -291,7 +293,7 @@ class ZOOptim(object):
                 loss1_added = torch.norm(x_expanded - x_0_expanded, dim=1)
                 loss2_added = self.loss(self.model(x_expanded.view(batch_size, *list(x_dim))))
                 additional_term = loss1_added + (c * loss2_added)
-                h_hat = (first_term + second_term - 2 * additional_term) / (h ** 2)
+                h_hat[batch_size * i:batch_size * (i + 1), :] = (first_term.view(-1, 1) + second_term.view(-1, 1) - 2 * additional_term.view(-1, 1)) / (h ** 2)
 
         # 3. Display info
         if verbose > 0:
