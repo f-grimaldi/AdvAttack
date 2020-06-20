@@ -154,7 +154,7 @@ class CIFAR10(torch.utils.data.Dataset):
                 transforms.Resize(self.dim, PIL.Image.LANCZOS),
                 transforms.ToTensor()
             ])
-        elif type(transform) == torch.transforms.Compose:
+        elif type(transform) == torchvision.transforms.Compose:
             return transform
         else:
             raise NotImplementedError('Chosen transformer is not valid')

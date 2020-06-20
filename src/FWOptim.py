@@ -165,20 +165,6 @@ class FrankWolfe(object):
         # Update momentum
         m = m_weight * m + (1-m_weight) * q
 
-        # # 3. Perform LMO
-        # if self.loss_type == 'inf':  # l-infinity norm
-        #     v = self.x_ori.view(-1) - self.epsilon*torch.sign(m)
-        # elif self.loss_type == 2:  # l-2 norm
-        #     v = self.x_ori.view(-1) - (self.epsilon*m)/torch.norm(m)
-        # elif self.loss_type == 1:  # l-1 norm (error)
-        #     raise ValueError('Can not use l-1 norm')
-        # else:  # Compute custom norm
-        #     p = self.loss_type
-        #     v = self.x_ori.view(-1) - torch.sign(m)*(self.epsilon*torch.abs(m)**(1/(p-1))/torch.sum(torch.abs(m)**(p/p-1))**(1/p))
-        # # # Error
-        # # else:
-        # #     raise NotImplementedError('Norm value not valid')
-
         # Compute Linear Minimization Oracle
         v = self.LMO(x_ori, m, l_bound=l_bound, l_type=l_type)
 
@@ -186,8 +172,6 @@ class FrankWolfe(object):
         x = x.view(-1) + step_size*(v-x.view(-1))
         # Clip values
         x = torch.clamp(x, *clip)
-        # x[x < self.C[0]] = self.C[0]
-        # x[x > self.C[1]] = self.C[1]
 
         # Display verbose info
         if verbose:

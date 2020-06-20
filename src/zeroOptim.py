@@ -695,17 +695,17 @@ class InexactZSCG(object):
             # 2.2 Perform LMO
             # Infinity norm
             if self.L_type == -1:
-                y_new = self.x_original.view(-1) - self.epsilon*torch.sign(g)
+                y_new = self.x_original.view(-1) - self.epsilon*torch.sign(grad)
             # L1 norm
             elif self.L_type == 1:
                 raise NotImplementedError
             elif self.L_type == 2:
-                y_new = self.x_original.view(-1) - (self.epsilon*g)/torch.norm(g, 2)
+                y_new = self.x_original.view(-1) - (self.epsilon*grad)/torch.norm(grad, 2)
             # Generic Lp norm (1 < p < +inf)
             else:
                 p = self.L_type
-                gp = torch.abs(g)**(1/p-1)
-                h = torch.sign(g) * (gp) / torch.norm(gp, p)
+                gp = torch.abs(grad)**(1/p-1)
+                h = torch.sign(grad) * (gp) / torch.norm(gp, p)
                 y_new = self.x_original.view(-1) - self.epsilon*h
 
             # 2.3 Compute new function value
@@ -724,7 +724,7 @@ class InexactZSCG(object):
             if h >= -mu or t > self.max_t:
                 k = 1
             else:
-                y_old = (t-1)/(t+1)*y_old + 2/(t+1)*y_new
+                y_old = ((t-1)/(t+1))*y_old + (2/(t+1))*y_new
                 t += 1
 
         return self.project_boundaries(y_old.detach())
