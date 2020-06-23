@@ -30,7 +30,7 @@ class ZOOptim(object):
         Args:
             Name                    Type                Description
             x:                      (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
-            c:                      (float)             Regularization parameter
+            c:                      (float)             Confidence
             learning_rate:          (float)             Learning rate
             n_gradient:             (int)               Coordinates we simultaneously optimize
             h:                      (float)             Gradient estimation accuracy O(h^2)
@@ -179,6 +179,7 @@ class ZOOptim(object):
         # 1. Select n_gradient dimensions
         if n_gradient > total_dim:
             raise ValueError("Batch size must be lower than the total dimension")
+
         indices = np.random.choice(total_dim, n_gradient, replace=False)
         e_matrix = torch.zeros(n_gradient, total_dim).to(self.device)
         for n, i in enumerate(indices):
@@ -211,6 +212,7 @@ class ZOOptim(object):
                 print('delta = {}'.format(delta))
 
             # 2.4 Return
+            g_hat.detach(), M_hat.detach(), v_hat.detach(), delta.detach()
             return self.project_boundaries(x, C).detach()
 
         elif solver == "newton":
@@ -234,6 +236,7 @@ class ZOOptim(object):
                 print('delta = {}'.format(delta))
 
             # 2.4 Return
+            g_hat.detach(), h_hat.detach(), delta.detach()
             return self.project_boundaries(x, C).detach()
 
 
@@ -275,13 +278,15 @@ class ZOOptim(object):
 
             # 2.2 Intermediate steps
             input_plus = x_expanded + h * e_matrix[batch_size*i:batch_size*(i+1), :]
-            input_minus = x_expanded - h * e_matrix[batch_size*i:batch_size*(i+1), :]
             out_plus = self.model(input_plus.view(batch_size, *list(x_dim)))
-            out_minus = self.model(input_minus.view(batch_size, *list(x_dim)))
             loss2_plus = self.loss(out_plus)
-            loss2_minus = self.loss(out_minus)
             loss1_plus = torch.norm(input_plus - x_0_expanded, dim=1)
+            input_plus.detach()
+            input_minus = x_expanded - h * e_matrix[batch_size*i:batch_size*(i+1), :]
+            out_minus = self.model(input_minus.view(batch_size, *list(x_dim)))
+            loss2_minus = self.loss(out_minus)
             loss1_minus = torch.norm(input_minus - x_0_expanded, dim=1)
+            input_minus.detach()
             first_term = loss1_plus + (c * loss2_plus)
             second_term = loss1_minus + (c * loss2_minus)
 
