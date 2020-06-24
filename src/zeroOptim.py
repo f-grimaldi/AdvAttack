@@ -29,8 +29,8 @@ class ZeroSGD(object):
     """
     def run(self, x, v, mk,
             ak, epsilon,
-            batch_size = -1,
-            C = (0, 1), verbose=0,
+            batch_size=-1,
+            C=(0, 1), verbose=0,
             max_steps=100,
             additional_out=False,
             tqdm_disabled=False):
@@ -46,8 +46,8 @@ class ZeroSGD(object):
         C:              (tuple)             The range of pixel values
         max_steps:      (int)               The maximum number of steps
         verbose:        (int)               Display information or not. Default is 0
-        additional_out  (bool)              Return also all the x. Default is False
-        tqdm_disable    (bool)              Disable the tqdm bar. Default is False
+        additional_out: (bool)              Return also all the x. Default is False
+        tqdm_disabled:  (bool)              Disable the tqdm bar. Default is False
         """
 
         self.total_dim = x.shape[0]*x.shape[1]*x.shape[2]
@@ -61,12 +61,12 @@ class ZeroSGD(object):
         self.batch = batch_size
 
         # Init list for results
-        losses, outs = [], [] #List of losses and outputs
+        losses, outs = [], []  #List of losses and outputs
         xs = []
 
         # Optimizaion Cycle
         self.x = x
-        for ep in tqdm(range(max_steps), disable=tqdm_disable):
+        for ep in tqdm(range(max_steps), disable=tqdm_disabled):
 
             # Call the step
             x, Gk = self.step(x, v, mk[ep], ak[ep], verbose)
@@ -79,7 +79,7 @@ class ZeroSGD(object):
 
             # Compute new loss
             x = x.reshape(1, self.dim[0], self.dim[1], self.dim[2])
-            out  = self.model(x)
+            out = self.model(x)
             loss = self.loss(out)
 
             # Save results
@@ -122,10 +122,10 @@ class ZeroSGD(object):
         x = x.float().to(self.device)
 
         # 2.Create x(k-1) + v*u(k-1)
-        uk     = torch.randn(mk, self.total_dim).to(self.device)                        # Dim (mk, channel*width*height)
-        img_u  = uk.reshape(mk, self.dim[0], self.dim[1], self.dim[2]).to(self.device)  # Dim (mk, channel, width, height)
-        img_x  = x.expand(mk, self.dim[0], self.dim[1], self.dim[2])                    # Dim (mk, channel, width, height)
-        m_x    = (img_x + v*img_u)                                                      # Dim (mk, channel, width, height)
+        uk = torch.randn(mk, self.total_dim).to(self.device)                        # Dim (mk, channel*width*height)
+        img_u = uk.reshape(mk, self.dim[0], self.dim[1], self.dim[2]).to(self.device)  # Dim (mk, channel, width, height)
+        img_x = x.expand(mk, self.dim[0], self.dim[1], self.dim[2])                    # Dim (mk, channel, width, height)
+        m_x = (img_x + v*img_u)                                                      # Dim (mk, channel, width, height)
 
         if verbose > 1:
             print('INPUT')
@@ -135,7 +135,7 @@ class ZeroSGD(object):
 
         # 3. Get objective functions
         standard_loss = self.loss(self.model(x.view(1, *list(self.dim))))               # Dim (1)
-        gaussian_loss = torch.zeros((mk)).to(self.device)                               # Dim (mk)
+        gaussian_loss = torch.zeros(mk).to(self.device)                               # Dim (mk)
         if self.batch == -1:
             gaussian_loss = self.loss(self.model(m_x))
         else:
@@ -148,7 +148,7 @@ class ZeroSGD(object):
             print('Gaussian Loss is: {}'.format(gaussian_loss))
 
         # 4. Compute gradient approximation
-        Gk  = self.compute_Gk(standard_loss, gaussian_loss, v, uk)                      # Dim (channel*width*height)
+        Gk = self.compute_Gk(standard_loss, gaussian_loss, v, uk)            # Dim (channel*width*height)
 
         # 5. Call verbose
         if verbose > 1:
@@ -188,7 +188,7 @@ class ZeroSGD(object):
         """
         # Compute Gv(x(k-1), chi(k-1), u(k))
         fv = ((gaussian_loss - standard_loss.expand(uk.shape[0]))/v).view(-1, 1)        # Dim (mk, 1)
-        G =  fv * uk                                                                    # Dim (mk, channel*width*height)
+        G = fv * uk                                                                    # Dim (mk, channel*width*height)
         return torch.mean(G, axis=0)                                                    # Dim (channel*width*height)
 
 
@@ -224,18 +224,18 @@ class ClassicZSCG(object):
         """
         Args:
         Name            Type                Description
-        x               (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
-        v               (float)             The gaussian smoothing
-        n_gradient      (list)              Number of normal vector to generate at every step
-        ak              (list)              Momentum  every step
-        epsilon         (float)             The upper bound of norm
-        L_type          (int)               Either -1 for L_infinity or x for Lx. Default is -1
-        batch_size      (int)               Maximum parallelization during the gradient estimation. Default is -1 (=n_grad)
-        C               (tuple)             The boundaires of the pixel. Default is (0, 1)
-        max_steps       (int)               The maximum number of steps. Default is 100
-        verbose         (int)               Display information or not. Default is 0
-        additional_out  (bool)              Return also all the x. Default is False
-        tqdm_disable    (bool)              Disable the tqdm bar. Default is False
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        v:              (float)             The gaussian smoothing
+        n_gradient:     (list)              Number of normal vector to generate at every step
+        ak:             (list)              Momentum  every step
+        epsilon:        (float)             The upper bound of norm
+        L_type:         (int)               Either -1 for L_infinity or x for Lx. Default is -1
+        batch_size:     (int)               Maximum parallelization during the gradient estimation. Default is -1 (=n_grad)
+        C:              (tuple)             The boundaires of the pixel. Default is (0, 1)
+        max_steps:      (int)               The maximum number of steps. Default is 100
+        verbose:        (int)               Display information or not. Default is 0
+        additional_out: (bool)              Return also all the x. Default is False
+        tqdm_disabled:  (bool)              Disable the tqdm bar. Default is False
         """
 
         x = x.to(self.device)
@@ -328,9 +328,9 @@ class ClassicZSCG(object):
         """
         Args:
         Name            Type                Description
-        x               (torch.tensor)      The current variable
-        bs              (int)               The maximum bacth size
-        v               (int)               The Gaussian smoothing
+        x:              (torch.tensor)      The current variable
+        bs:             (int)               The maximum bacth size
+        v:              (int)               The Gaussian smoothing
         """
         uk     = torch.empty(bs, self.total_dim).normal_(mean=0, std=1).to(self.device) # Dim (bs, channel*width*height)
         img_u  = uk.reshape(bs, self.dim[0], self.dim[1], self.dim[2])                  # Dim (bs, channel, width, height)
@@ -482,20 +482,20 @@ class InexactZSCG(object):
         """
         Args:
         Name            Type                Description
-        x               (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
-        v               (float)             The gaussian smoothing
-        n_gradient      (list)              Number of normal vector to generate at every step
-        gamma_k         (list)              Momentum at every step inside ICG
-        mu_k            (list)              Stoppinc criterion at every step k inside ICG
-        max_t           (int)               The maximum number of iteration inside of ICG.
-        epsilon         (float)             The upper bound of norm
-        L_type          (int)               Either -1 for L_infinity or x for Lx. Default is -1
-        batch_size      (int)               Maximum parallelization during the gradient estimation. Default is -1 (=n_grad)
-        C               (tuple)             The boundaires of the pixel. Default is (0, 1)
-        max_steps       (int)               The maximum number of steps. Default is 100
-        verbose         (int)               Display information or not. Default is 0
-        additional_out  (bool)              Return also all the x. Default is False
-        tqdm_disable    (bool)              Disable the tqdm bar. Default is False
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        v:              (float)             The gaussian smoothing
+        n_gradient:     (list)              Number of normal vector to generate at every step
+        gamma_k:        (list)              Momentum at every step inside ICG
+        mu_k:           (list)              Stoppinc criterion at every step k inside ICG
+        max_t:          (int)               The maximum number of iteration inside of ICG.
+        epsilon:        (float)             The upper bound of norm
+        L_type:         (int)               Either -1 for L_infinity or x for Lx. Default is -1
+        batch_size:     (int)               Maximum parallelization during the gradient estimation. Default is -1 (=n_grad)
+        C:              (tuple)             The boundaires of the pixel. Default is (0, 1)
+        max_steps:      (int)               The maximum number of steps. Default is 100
+        verbose:        (int)               Display information or not. Default is 0
+        additional_out: (bool)              Return also all the x. Default is False
+        tqdm_disabled:  (bool)              Disable the tqdm bar. Default is False
         """
 
         x = x.to(self.device)
@@ -511,8 +511,8 @@ class InexactZSCG(object):
         self.max_t = max_t
 
         # 2. Init list of results
-        losses, outs = [], []
-        x_list = []
+        losses, outs = [], [],
+        input_list = []
 
         # 3. Main optimization cycle
         for ep in tqdm(range(max_steps), disable=tqdm_disabled):
@@ -533,7 +533,7 @@ class InexactZSCG(object):
             losses.append(loss.detach().cpu().item())
             outs.append(out.detach().cpu()[0, self.loss.neuron].item())
             if additional_out:
-                x_list.append(x.cpu())
+                input_list.append(x.cpu())
 
             # 3.4 Display current info
             if verbose:
@@ -548,7 +548,7 @@ class InexactZSCG(object):
 
         if additional_out:
             return x, losses, outs, input_list
-        return  x, losses, outs
+        return x, losses, outs
 
     """
     Do an optimization step
@@ -586,9 +586,9 @@ class InexactZSCG(object):
         """
         Args:
         Name            Type                Description
-        x               (torch.tensor)      The current variable
-        bs              (int)               The maximum bacth size
-        v               (int)               The Gaussian smoothing
+        x:              (torch.tensor)      The current variable
+        bs:             (int)               The maximum bacth size
+        v:              (int)               The Gaussian smoothing
         """
         uk     = torch.empty(bs, self.total_dim).normal_(mean=0, std=1).to(self.device) # Dim (bs, channel*width*height)
         img_u  = uk.reshape(bs, self.dim[0], self.dim[1], self.dim[2])                  # Dim (bs, channel, width, height)
@@ -770,21 +770,21 @@ class InexactAcceleratedZSCG(object):
         """
         Args:
         Name            Type                Description
-        x               (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
-        v               (float)             The gaussian smoothing
-        n_gradient      (list)              Number of normal vector to generate at every step
-        alpha_k         (list)              Momentum at every step inside main cycle
-        gamma_k         (list)              Momentum at every step inside ICG
-        mu_k            (list)              Stoppinc criterion at every step k inside ICG
-        max_t           (int)               The maximum number of iteration inside of ICG.
-        epsilon         (float)             The upper bound of norm
-        L_type          (int)               Either -1 for L_infinity or x for Lx. Default is -1
-        batch_size      (int)               Maximum parallelization during the gradient estimation. Default is -1 (=n_grad)
-        C               (tuple)             The boundaires of the pixel. Default is (0, 1)
-        max_steps       (int)               The maximum number of steps. Default is 100
-        verbose         (int)               Display information or not. Default is 0
-        additional_out  (bool)              Return also all the x. Default is False
-        tqdm_disable    (bool)              Disable the tqdm bar. Default is False
+        x:              (torch.tensor)      The variable of our optimization problem. Should be a 3D tensor (img)
+        v:              (float)             The gaussian smoothing
+        n_gradient:     (list)              Number of normal vector to generate at every step
+        alpha_k:        (list)              Momentum at every step inside main cycle
+        gamma_k:        (list)              Momentum at every step inside ICG
+        mu_k:           (list)              Stoppinc criterion at every step k inside ICG
+        max_t:          (int)               The maximum number of iteration inside of ICG.
+        epsilon:        (float)             The upper bound of norm
+        L_type:         (int)               Either -1 for L_infinity or x for Lx. Default is -1
+        batch_size:     (int)               Maximum parallelization during the gradient estimation. Default is -1 (=n_grad)
+        C:              (tuple)             The boundaires of the pixel. Default is (0, 1)
+        max_steps:      (int)               The maximum number of steps. Default is 100
+        verbose:        (int)               Display information or not. Default is 0
+        additional_out: (bool)              Return also all the x. Default is False
+        tqdm_disabled:  (bool)              Disable the tqdm bar. Default is False
         """
 
         x = x.to(self.device)
@@ -801,7 +801,7 @@ class InexactAcceleratedZSCG(object):
 
         # 2. Init list of results
         losses, outs = [], []
-        x_list = []
+        input_list = []
 
         # 3. Main optimization cycle
         for ep in tqdm(range(max_steps), disable=tqdm_disabled):
@@ -822,7 +822,7 @@ class InexactAcceleratedZSCG(object):
             losses.append(loss.detach().cpu().item())
             outs.append(out.detach().cpu()[0, self.loss.neuron].item())
             if additional_out:
-                x_list.append(x.cpu())
+                input_list.append(x.cpu())
 
             # 3.4 Display current info
             if verbose:
@@ -877,9 +877,9 @@ class InexactAcceleratedZSCG(object):
         """
         Args:
         Name            Type                Description
-        x               (torch.tensor)      The current variable
+        x:              (torch.tensor)      The current variable
         bs              (int)               The maximum bacth size
-        v               (int)               The Gaussian smoothing
+        v:              (int)               The Gaussian smoothing
         """
         uk     = torch.empty(bs, self.total_dim).normal_(mean=0, std=1).to(self.device) # Dim (bs, channel*width*height)
         img_u  = uk.reshape(bs, self.dim[0], self.dim[1], self.dim[2])                  # Dim (bs, channel, width, height)
