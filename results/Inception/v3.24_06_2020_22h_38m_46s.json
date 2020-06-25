@@ -1,0 +1,1 @@
+{"Optimizer": "fw", "Accuracy": 0.1, "Mean time": [534.491, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "Mean epsilon": 3.99, "Params": {"m_weight": 0.2, "step_size": 1, "num_epochs": 2, "l_bound": 4, "l_type": 2, "grad_smooth": 0.001, "grad_num_iter": 500, "grad_batch_size": 25, "grad_how": "gauss"}}
