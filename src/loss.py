@@ -6,7 +6,7 @@ Abstract object for the Custom Loss. Child of nn.Module
 """
 class Loss(object):
 
-    def __init__(self, neuron, maximise=0):
+    def __init__(self, neuron, maximise=0, is_softmax=False):
         """
         Args:
             Name       Type    Desc
@@ -15,6 +15,7 @@ class Loss(object):
         """
         self.neuron = neuron
         self.maximise = maximise
+        self.is_softmax = is_softmax
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
@@ -32,14 +33,13 @@ class MSELoss(Loss):
     def __init__(self, neuron, maximise=0, is_softmax=False, dim=1):
         """
         Args:
-            Name        Type    Desc
-            neuron:     int     The output neuron to minimize
-            maximise    bool.   The desired activation (0/1)
-            is_softmax:  bool     Bool indicating if the model output is probability distribution. Defaulti is False
-            dim:         int      Dimension of softmax application. Default is 1
+            Name         Type    Desc
+            neuron:      int     The output neuron to minimize
+            maximise:    bool    The desired activation (0/1)
+            is_softmax:  bool    Bool indicating if the model output is probability distribution. Default is False
+            dim:         int     Dimension of softmax application. Default is 1
         """
-        super().__init__(neuron, maximise)
-        self.is_softmax = is_softmax
+        super().__init__(neuron, maximise, is_softmax)
         self.dim = dim
 
     """
@@ -78,9 +78,8 @@ class ZooLoss(Loss):
         is_softmax:  bool      Bool indicating if the model output is probability distribution. Default is False
         dim:         int       Dimension of softmax application. Default is 1
         """
-        super().__init__(neuron, maximise)
+        super().__init__(neuron, maximise, is_softmax)
         self.transf = transf
-        self.is_softmax = is_softmax
         self.dim = dim
 
 

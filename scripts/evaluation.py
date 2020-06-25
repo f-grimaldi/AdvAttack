@@ -219,7 +219,7 @@ def get_optimization_params(optim, x, args):
 
 def get_data(n_example, data_batch_size, dataloader, device):
     if n_example < data_batch_size:
-        raise ValueError('n_exaple is less than data_batch_size. Please use --data_batch_size n --n_example m with m >= n')
+        raise ValueError('n_example is less than data_batch_size. Please use --data_batch_size n --n_example m with m >= n')
     n_batch = n_example//data_batch_size
     X_ori = torch.Tensor()
     y_ori = torch.Tensor().long()
@@ -284,7 +284,7 @@ def target_run(args, model, X_ori, y_ori, device):
             if y == i:
                 continue
             # a. Init loss, optimizer and params
-            loss_fn =  get_loss(args.loss, i, 1, args.is_softmax, args.softmax_dim)
+            loss_fn = get_loss(args.loss, i, 1, args.is_softmax, args.softmax_dim)
             optim = get_optimizer(args.optimizer, model, loss_fn, device)
             params = get_optimization_params(optim, X, args)
 

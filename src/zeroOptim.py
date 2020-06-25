@@ -587,7 +587,7 @@ class InexactZSCG(object):
         Args:
         Name            Type                Description
         x:              (torch.tensor)      The current variable
-        bs:             (int)               The maximum bacth size
+        bs:             (int)               The maximum batch size
         v:              (int)               The Gaussian smoothing
         """
         uk     = torch.empty(bs, self.total_dim).normal_(mean=0, std=1).to(self.device) # Dim (bs, channel*width*height)
