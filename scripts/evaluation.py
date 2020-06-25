@@ -184,6 +184,8 @@ def get_optimization_params(optim, x, args):
     elif type(optim) == FWOptim.FrankWolfe:
         if args.L_type == -1:
             l_type = 'inf'
+        else:
+            l_type = args.L_type
         if args.verbose == 0:
             verbose = False
         else:
