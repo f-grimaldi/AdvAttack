@@ -107,7 +107,7 @@ def get_optimizer(optim, model, loss, device):
     elif optim == 'zoo':
         return ZOOptim.ZOOptim(model, loss, device)
     elif optim == 'fw':
-        return FWOptim.FWOptim(model, loss, device)
+        return FWOptim.FrankWolfe(model, loss, device)
     else:
         print('Select one of the following optimizer:')
         print('Command                 Class           Descr')
@@ -178,20 +178,28 @@ def get_optimization_params(optim, x, args):
                   'C': args.C,
                   'tqdm_disabled': args.tqdm_disabled,
                   'verbose': args.verbose}
-    elif type(optim) == FWOptim.FWOptim:
-        params = {'x': x,
-                  'n_gradient': args.n_gradient,
-                  'batch_size': bs,
-                  'beta': args.FW_beta,
-                  'delta': args.FW_delta,
-                  'gamma': args.FW_gamma,
-                  'epsilon': args.epsilon,
-                  'L_type': args.L_type,
-                  'additional_out': args.additional_out,
-                  'max_steps': EPOCH,
-                  'C': args.C,
-                  'tqdm_disabled': args.tqdm_disabled,
-                  'verbose': args.verbose}
+    elif type(optim) == FWOptim.FrankWolfe:
+                if args.L_type == -1:
+                    l_type = 'inf'
+                else:
+                    l_type = 2
+                if args.verbose == 0:
+                    verbose = False
+                else:
+                    verbose = True
+                params = {
+                    'x': x,
+                    'grad_num_iter': args.n_gradient,
+                    'grad_batch_size': bs,  # args.batch_size
+                    'm_weight': args.FW_beta,
+                    'grad_smooth': args.FW_delta,
+                    'step_size': args.FW_gamma,
+                    'l_bound': args.epsilon,
+                    'l_type': l_type,  # args.L_type
+                    'num_epochs': EPOCH,  # args.epochs
+                    'clip': args.C,
+                    'verbose': verbose
+                }
 
     else:
         print('Select one of the following optimizer:')
@@ -453,7 +461,7 @@ if __name__ == '__main__':
     if X.shape[0] > 1:
         ax[1].imshow(np.transpose(X.cpu().numpy(), (1, 2, 0)))
     else:
-        ax[1].imshow(X.cpu().numpy().reshape(X.shape[1], X.shape[2]))
+        ax[1].imshow(X.cpu().numpy().reshape(X.shape[1], X.shape[2]), cmap='gray')
     ax[1].set_title('Before attack\nP(X={}) = {:.3f}\nP(X={}) = {:.3f}'.format(y, original_out[0, y], new_y, original_out[0, new_y]))
 
     # 9.b) New Image
@@ -496,7 +504,7 @@ if __name__ == '__main__':
     if new_x.shape[0] > 1:
         ax[2].imshow(np.transpose(new_x.cpu().numpy(), (1, 2, 0)))
     else:
-        ax[2].imshow(new_x.cpu().numpy().reshape(new_x.shape[1], new_x.shape[2]))
+        ax[2].imshow(new_x.cpu().numpy().reshape(new_x.shape[1], new_x.shape[2]), cmap='gray')
     ax[2].set_title('After attack\nP(X={}) = {:.3f}\nP(X={}) = {:.3f}'.format(y, new_out[0, y], new_y, new_out[0, new_y]))
     plt.show()
 
