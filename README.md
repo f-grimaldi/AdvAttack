@@ -1,8 +1,26 @@
 # AdvAttack 
-###Zero Order Optimization Algorithm for Constrained Non-Convex Optimization
+## Zero Order Optimization Algorithm for Constrained Non-Convex Optimization
+This repository contains the code to implements various zero order algorithms used to perform adversarial attacks against black box Deep Neural Networks.
+
+### Requirements
+* **Python 3**
+* sys
+* os
+* time
+* argparse
+* warnings
+* json
+* datatime
+* tqdm
+* numpy
+* matplotlib
+* PIL
+* sklearn
+* torch
+* torchvision
 
 
-## Code Structure
+### Code Structure
 * papers
 * models
 * results
@@ -40,3 +58,12 @@ Src contains:
 * *[XXX]Optim.py* implement the optimizers described in the papers.
 
 *Attack[dataset]_[optimizer].py* are used to perform a specific attack on a specific dataset and to visualize the generated adversarial image and the loss function.
+
+
+### Examples
+Here we give an example of how to run an evaluation of *Zero Stochastic Conditional Gradient with Inexact Updates* against *VGG16* fine-tuned on*Cifar10*. Only a subset of arguments will be given, full explanation of the arguments can be found inside the scripts. 
+
+      cd scripts
+      evaluation.py --optimizer "inexact" -- data "cifar10" --maximise 0 --epochs 100 --n_gradient 4000 --batch_size 1000 --mu 0.0025 --gamma 1       
+
+   
