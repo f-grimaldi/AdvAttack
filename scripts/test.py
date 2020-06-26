@@ -1,5 +1,9 @@
 def load_data(dataset, is_inception, root, transform, batch_size, num_workers):
 
+    if os.path.exists(root) == False:
+        os.makedirs(root)
+
+        
     if is_inception and transform == 'standard':
         print('Trying to use inceptionV3 without upscaling!')
         print('Use --transform "upscale" when --use_inception')
