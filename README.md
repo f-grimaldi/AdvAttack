@@ -61,9 +61,13 @@ Src contains:
 
 
 ### Examples
-Here we give an example of how to run an evaluation of *Zero Stochastic Conditional Gradient with Inexact Updates* against *VGG16* fine-tuned on*Cifar10*. Only a subset of arguments will be given, full explanation of the arguments can be found inside the scripts. 
+Here we give an example of how to run an evaluation of *Zero Stochastic Conditional Gradient with Inexact Updates* against *VGG16* fine-tuned on *Cifar10*. Only a subset of arguments will be given, full explanation of the arguments can be found inside the scripts. <br>
+If the data is not already present in the folder *data* the scripts will automatically create the folder *data* and download the data in there. 
 
       cd scripts
       evaluation.py --optimizer "inexact" -- data "cifar10" --maximise 0 --epochs 100 --n_gradient 4000 --batch_size 1000 --mu 0.0025 --gamma 1       
 
-   
+**N.B** <br>
+1- All the scripts and jupyter notebook should be able to run without a problem in GPU thanks to *cuda* interface. If you don't have *cuda* or you are not able to have it (you don't have an NVIDIA GPU), we strongly suggest you to run everything on *Google Colab*.
+
+2- The models uploaded are only *VGG16* and *MNISTNet* while the *InceptionV3* fine-tuned on *Cifar10* and *MNIST* data are not present. Too fine -tune your *InceptionV3* model one can see *TransferLearning.ipynb* otherwise you can contact us at *francesco.grimaldi.1@studenti.unipd.it* and we will send you the model through Google Drive.
