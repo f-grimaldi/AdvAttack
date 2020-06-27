@@ -110,6 +110,8 @@ def get_optimizer(optim, model, loss, device):
         return zeroOptim.ZeroSGD(model, loss, device)
     elif optim == 'zoo':
         return ZOOptim.ZOOptim(model, loss, device)
+    elif optim == 'hdzoo':
+        return ZOOptim.HDZOOptim(model, loss, device)
     elif optim == 'fw':
         return FWOptim.FrankWolfe(model, loss, device)
     else:
@@ -119,6 +121,7 @@ def get_optimizer(optim, model, loss, device):
         print('--optimizer "classic"   ClassicZSCG     Zero-order Stochastic Conditional Gradient')
         print('--optimizer "zero_sgd"  ZeroSGD         Zero-order Stochastic Gradient Descent')
         print('--optimizer "zoo"       ZOOptim         Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton')
+        print('--optimizer "hdzoo"     ZOOptim         Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton for InceptionV3')
         print('--optimizer "fw"        FWOptim         Zero-order Frank-Wolfe Gradient Descent')
         raise NotImplementedError
         sys.exit(1)
@@ -167,7 +170,7 @@ def get_optimization_params(optim, x, args):
                   'max_steps': EPOCH,
                   'tqdm_disabled': args.tqdm_disabled,
                   'verbose': args.verbose}
-    elif type(optim) == ZOOptim.ZOOptim:
+    elif type(optim) == ZOOptim.ZOOptim or type(optim) == ZOOptim.HDZOOptim:
         params = {'x': x,
                   'c': args.c,
                   'n_gradient': args.n_gradient,
@@ -212,6 +215,7 @@ def get_optimization_params(optim, x, args):
         print('--optimizer "classic"   ClassicZSCG     Zero-order Stochastic Conditional Gradient')
         print('--optimizer "zero_sgd"  ZeroSGD         Zero-order Stochastic Gradient Descent')
         print('--optimizer "zoo"       ZOOptim         Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton')
+        print('--optimizer "hdzoo"     ZOOptim         Zero-order Stochastic Gradient Descent with Coordinate-wise ADAM/Newton for InceptionV3')
         print('--optimizer "fw"        FWOptim         Zero-order Frank-Wolfe Gradient Descent')
         raise NotImplementedError
         sys.exit(1)
