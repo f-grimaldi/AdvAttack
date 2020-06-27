@@ -1,5 +1,5 @@
 # AdvAttack 
-## Zero Order Optimization Algorithm for Constrained Non-Convex Optimization
+## Zeroth Order Optimization Based Black-boxAttacks to Deep Neural Networks
 This repository contains the code to implements various zero order algorithms used to perform adversarial attacks against black box Deep Neural Networks.<br>
 The full description of the problem, analysis and conclusion can be found in *Report.pdf*.
 
