@@ -3,7 +3,7 @@ def load_data(dataset, is_inception, root, transform, batch_size, num_workers):
     if os.path.exists(root) == False:
         os.makedirs(root)
 
-        
+
     if is_inception and transform == 'standard':
         print('Trying to use inceptionV3 without upscaling!')
         print('Use --transform "upscale" when --use_inception')
@@ -526,6 +526,9 @@ if __name__ == '__main__':
             'Results': {'Success': success, 'Time taken': end_time, 'Steps': len(loss_list)},
             'All_config_args': vars(args)}
 
+    if os.path.exists(args.logs_path) == False:
+        os.makedirs(args.logs_path)
+        
     now = datetime.now()
     log_time = now.strftime("%d_%m_%Y_%Hh_%Mm_%Ss")
     LOG_PATH = '{}/test_py_logs_{}'.format(args.logs_path, log_time)

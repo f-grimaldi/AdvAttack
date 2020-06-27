@@ -559,6 +559,10 @@ if __name__ == '__main__':
                         'Mean epsilon': float(np.mean(epsilon))},
             'All_config_args': vars(args)}
 
+
+    if os.path.exists(args.logs_path) == False:
+        os.makedirs(args.logs_path) 
+
     now = datetime.now()
     log_time = now.strftime("%d_%m_%Y_%Hh_%Mm_%Ss")
     if args.optimizer == 'zoo':
