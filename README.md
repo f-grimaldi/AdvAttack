@@ -1,6 +1,7 @@
 # AdvAttack 
 ## Zero Order Optimization Algorithm for Constrained Non-Convex Optimization
-This repository contains the code to implements various zero order algorithms used to perform adversarial attacks against black box Deep Neural Networks.
+This repository contains the code to implements various zero order algorithms used to perform adversarial attacks against black box Deep Neural Networks.<br>
+The full description of the problem, analysis and conclusion can be found in *Report.pdf*.
 
 ### Requirements
 * **Python 3**
@@ -39,6 +40,7 @@ This repository contains the code to implements various zero order algorithms us
     * FWOptim.py
 * Attack[dataset]_[optimizer].py
 * TransferLearning.ipynb
+* Report.pdf
 
 
 ### Description
