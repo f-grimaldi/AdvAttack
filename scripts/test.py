@@ -528,11 +528,11 @@ if __name__ == '__main__':
 
     if os.path.exists(args.logs_path) == False:
         os.makedirs(args.logs_path)
-        
+
     now = datetime.now()
     log_time = now.strftime("%d_%m_%Y_%Hh_%Mm_%Ss")
     LOG_PATH = '{}/test_py_logs_{}'.format(args.logs_path, log_time)
     print('\n6. Saving log file and figure at {}'.format(LOG_PATH))
     fig.savefig('{}.jpg'.format(LOG_PATH))
-    with open('{}.txt'.format(LOG_PATH), 'w') as file:
+    with open('{}.json'.format(LOG_PATH), 'w') as file:
         json.dump(logs, file)
